@@ -4,7 +4,7 @@
 #! Name of the job:
 #SBATCH -J test_dmtcp
 #! Account name for group, use SL2 for paying queue:
-#SBATCH -A WOODLAND-SL3-CPU
+#SBATCH -A <SOME_PROJECT_NAME>
 #! Output filename:
 #! %A means slurm job ID and %a means array index
 #SBATCH --output=test_dmtcp_%A_%a.out
@@ -22,7 +22,7 @@
 #! Estimated maximum memory needed (job is force-stopped if exceeded):
 #! RAM is allocated in ~5980mb blocks, you are charged per block used,
 #! and unused fractions of blocks will not be usable by others.
-#SBATCH --mem=6840mb
+#SBATCH --mem=5980mb
 #! Submit a job array with index values between 0 and 63
 #! NOTE: This must be a range, not a single number (i.e. specifying '32' here would only run one job, with index 32)
 #SBATCH --array=0-127
@@ -53,39 +53,31 @@ echo "This is job" $SLURM_ARRAY_TASK_ID
 
 nj=128
 recog_set="test"
-# recog_set="test_zero"
-# expdir=/home/gs534/rds/hpc-work/work/AMI/exp/ami_train_cnn_baseline_replicate_ptrversion
-# expdir=/home/gs534/rds/hpc-work/work/AMI/exp/ami_train_cnn_DBsmoothing_KB200_drop_replicate
-# expdir=/home/gs534/rds/hpc-work/work/Librispeech/rnnt_exp_100/Librispeech100_rnnt_KB100_KBin_drop_embed1024
-expdir=/home/gs534/rds/rds-t2-cs164-KQ4S3rlDzm8/gs534/slurp/exp/slurp_conformer_sepslottcpgen20_10distractor_noproj_sche22_copysup_GCNslot3in_f30_maskedless_share_entity
-# expdir=/home/gs534/rds/rds-t2-cs164-KQ4S3rlDzm8/gs534/slurp/exp/slurp_conformer_AKA_rarepure_finetune_nomask_freeze2
-# tag="no_lm_b30_beam3"
-# tag="wordpiece_lm_b30_0.25_ilme0.25"
+expdir=<PATH_TO_THE_EXPDIR>
 tag="no_lm_b30_KBontof30_topclass2entaug_classptr"
 pids=() # initialize pids
 use_lm=false
 use_wordlm=false
-dumpdir=/home/gs534/rds/hpc-work/work/slurp/dump
+dumpdir=dump
 do_delta=false
 backend=pytorch
 
 # Task specific
 decode_config=conf/decode.yaml
 recog_model=model.acc.best
-# recog_model=model.loss.best
-lmexpdir=/home/gs534/rds/hpc-work/work/AMI/exp/external_rnnlm
+lmexpdir=<path_to_the_LM_shallow_fusion_dir if using shallow fusion>
 wordlevel=false
 fixedemb=false
 
 bpemode=unigram
 nbpe=600
 suffix='suffix'
-dict=/home/gs534/rds/hpc-work/work/slurp/data/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
+dict=data/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
 
 decode_dir=decode_${recog_set}_${tag}
 feat_recog_dir=${dumpdir}/${recog_set}/delta${do_delta}
 mkdir -p ${expdir}/${decode_dir}
-/home/gs534/rds/hpc-work/work/espnet-mm/egs/slurp/asr1/decode_bpe.sh $((SLURM_ARRAY_TASK_ID+1)) \
+./decode_bpe.sh $((SLURM_ARRAY_TASK_ID+1)) \
  	${recog_set} \
         ${decode_dir} \
         ${feat_recog_dir} \
