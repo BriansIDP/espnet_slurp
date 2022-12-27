@@ -47,7 +47,7 @@ from espnet.nets.pytorch_backend.KB_utils.wer import editDistance, getStepList
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.utils.fill_missing_args import fill_missing_args
 # Modality matching
-from espnet.nets.pytorch_backend.modality.roberta import Roberta_encoder, GPT2_encoder
+from espnet.nets.pytorch_backend.modality.plm import Roberta_encoder, GPT2_encoder
 
 CTC_LOSS_THRESHOLD = 10000
 random.seed(1)
