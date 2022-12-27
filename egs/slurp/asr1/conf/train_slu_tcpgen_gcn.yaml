@@ -59,15 +59,16 @@ report-interval-iters: 20
 # freeze-mod: enc,att
 
 ### KB related
-meetingpath: /home/gs534/rds/hpc-work/work/slurp/data/KBs/SLURPKB_unigram600suffix/rarewords_f30.txt
+meetingpath: data/KB/rarewords_f30.txt
 meetingKB: true
-dictfile: /home/gs534/rds/hpc-work/work/slurp/data/KBs/bpe_dict_unigram600suffix.txt
+dictfile: data/KB/bpe_dict_unigram600suffix.txt
 lm-odim: 256
 KBlextree: true
 PtrGen: true
 PtrSche: 20
+
 ### initialise from the checkpoint of the pretrained ASR model (trained 20 epochs on Librispeech 960-hour)
-init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/exp/librispeech_train_conformer_KB1000_KB256_spec_drop_gcn2l/results/model.acc.best
+# init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/exp/librispeech_train_conformer_KB1000_KB256_spec_drop_gcn2l/results/model.acc.best
 acousticonly: true
 attn_dim: 256
 KBmaxlen: 20
@@ -81,12 +82,12 @@ mmfactor: 0.0
 pooling: index
 
 # SLU
-slotfile: /home/gs534/rds/hpc-work/work/slurp/data/SLU/slottypes_bpe.txt
-connection: /home/gs534/rds/hpc-work/work/slurp/data/SLU/connections_bpe.txt
-intentfile: /home/gs534/rds/hpc-work/work/slurp/data/SLU/intents.txt
+slotfile: data/SLU/slottypes_bpe.txt
+connection: data/SLU/connections_bpe.txt
+intentfile: data/SLU/intents.txt # although intent classification is not a task in this case
 doslu: true
 slotfactor: 1.0
-intentfactor: 1.0
+intentfactor: 0.0
 ndistractors: 10
 
 jointrep: true
@@ -96,8 +97,8 @@ robertamask: 0.2
 jointptrgen: true
 topnslot: 2
 ### Toggle between wordlevel and entitylevel KB
-# ontology: /home/gs534/rds/hpc-work/work/slurp/data/KBs/word_onts/word_ontology_f30.json
-ontology: /home/gs534/rds/hpc-work/work/slurp/data/KBs/word_onts/ontologymerge_entf30_unigram600suffix.json
+# ontology: data/KB/word_ontology_f30.json
+ontology: data/KB/ontologymerge_entf30_unigram600suffix.json
 
 slotKB: true
 copylossfac: 1.0
