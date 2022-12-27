@@ -1,5 +1,15 @@
 # The example directory for the KA2G framework #
 
+<!-- PIPELINE -->
+<br />
+<div align="center">
+  <a>
+    <img src="modelstructure.pdf" alt="pipeline" width="800" height="180">
+  </a>
+  <h3 align="center">The KA2G Framework for Knowledge-Aware Audio-Grounded Generative Slot Filling</h3>
+  </p>
+</div>
+
 ## Feature extraction ##
 Feature extraction and label .json file preparation follows `espnet/egs2/slurp/asr1`. Please check the README.md file there.
 Once features are extracted, `data_unigram600suffix.json` file should be in `dump/{train,devel,test}/deltafalse/` directory. Biasing entities and slot labels should be added for each utterance. 
