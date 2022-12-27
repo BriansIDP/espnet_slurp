@@ -1,0 +1,56 @@
+currency_name CUR RE N C Y▁ NA ME▁
+food_type FO O D▁ T Y P E▁
+business_type BU SI NESS▁ T Y P E▁
+order_type OR DER▁ T Y P E▁
+list_name LI ST▁ NA ME▁
+date D ATE▁
+timeofday TI ME O F DAY▁
+person PER SON▁
+personal_info PER SON AL▁ IN FO ▁
+time TIME▁
+relation RE L ATION▁
+definition_word DE F IN IT ION▁ WOR D▁
+event_name E VEN T▁ NA ME▁
+joke_type JO KE▁ T Y P E▁
+podcast_descriptor PO D CA ST▁ DE S C RI P T OR▁
+podcast_name PO D CA ST▁ NA ME▁
+artist_name AR TI ST▁ NA ME▁
+device_type DE V ICE▁ T Y P E▁
+media_type ME DI A▁ T Y P E▁
+place_name PLACE▁ NA ME▁
+music_genre M US IC▁ G EN RE▁
+business_name BU SI NESS▁ NA ME▁
+general_frequency G EN ER AL▁ F RE QUE N C Y▁
+player_setting PLA Y ER▁ SE T TING▁
+audiobook_name AU DI O BO O K▁ NA ME▁
+transport_agency TRA N S PORT ▁ AG EN C Y▁
+news_topic NE W S▁ T OP IC▁
+radio_name RA DI O ▁ NA ME▁
+email_folder E MA IL▁ F OL DER▁
+house_place HOUSE▁ PLACE▁
+color_type COL OR▁ T Y P E▁
+weather_descriptor WE AT HER▁ DE S C RI P T OR▁
+playlist_name PLA Y LI ST▁ NA ME▁
+transport_type TRA N S PORT ▁ T Y P E▁
+game_name GA ME▁ NA ME▁
+transport_name TRA N S PORT ▁ NA ME▁
+music_descriptor M US IC▁ DE S C RI P T OR▁
+app_name APP ▁ NA ME▁
+song_name SO NG▁ NA ME▁
+meal_type ME AL▁ T Y P E▁
+change_amount CH ANG E▁ A MO UN T▁
+movie_type MO VI E▁ T Y P E▁
+movie_name MO VI E▁ NA ME▁
+alarm_type AL AR M▁ T Y P E▁
+drink_type D RI N K▁ T Y P E▁
+email_address E MA IL▁ AD D RES S▁
+game_type GA ME▁ T Y P E▁
+time_zone TIME▁ Z ONE▁
+audiobook_author AU DI O BO O K▁ AU TH OR▁
+cooking_type CO O KING▁ T Y P E▁
+coffee_type C OFF E E▁ T Y P E▁
+ingredient IN GRE DI EN T▁
+sport_type S PORT ▁ T Y P E▁
+music_album M US IC▁ AL BU M▁
+transport_descriptor TRA N S PORT ▁ DE S C RI P T OR▁
+query_detail QUE RY▁ DE TA IL▁

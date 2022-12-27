@@ -1,0 +1,115 @@
+{
+    "utts": {
+        "slurp_FE-128_1488991450": {
+            "input": [
+                {
+                    "feat": "/home/gs534/rds/hpc-work/work/slurp/dump/train/deltafalse/feats.1.ark:273136",
+                    "name": "input1",
+                    "shape": [
+                        395,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        11,
+                        601
+                    ],
+                    "text": "HOW CAN THE WORD PLACID BE USED",
+                    "token": "HOW▁ CAN▁ THE▁ WOR D▁ PLA CI D▁ BE▁ US ED▁",
+                    "tokenid": "212 78 496 580 119 392 85 119 66 537 124",
+                    "entities": [
+                        {
+                            "span": [
+                                4
+                            ],
+                            "type": "definition_word"
+                        }
+                    ],
+                    "intent": "qa_definition",
+                    "uttKB": [
+                        [
+                            "PLA",
+                            "CI",
+                            "D▁"
+                        ]
+                    ]
+                }
+            ],
+            "utt2spk": "slurp_FE-128"
+        },
+        "slurp_FE-128_1488991195": {
+            "input": [
+                {
+                    "feat": "/home/gs534/rds/hpc-work/work/slurp/dump/train/deltafalse/feats.1.ark:24",
+                    "name": "input1",
+                    "shape": [
+                        209,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        4,
+                        601
+                    ],
+                    "text": "SUPER SONG",
+                    "token": "SU PER▁ SO NG▁",
+                    "tokenid": "470 388 454 340",
+                    "entities": [],
+                    "intent": "music_likeness",
+                    "uttKB": []
+                }
+            ],
+            "utt2spk": "slurp_FE-128"
+        },
+        "slurp_FE-128_1488991199": {
+            "input": [
+                {
+                    "feat": "/home/gs534/rds/hpc-work/work/slurp/dump/train/deltafalse/feats.1.ark:18080",
+                    "name": "input1",
+                    "shape": [
+                        228,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        7,
+                        601
+                    ],
+                    "text": "REPEAT THE LAST SONG",
+                    "token": "RE PE AT▁ THE▁ LAST▁ SO NG▁",
+                    "tokenid": "414 384 49 496 269 454 340",
+                    "entities": [
+                        {
+                            "span": [
+                                0
+                            ],
+                            "type": "player_setting"
+                        },
+                        {
+                            "span": [
+                                2,
+                                3
+                            ],
+                            "type": "song_name"
+                        }
+                    ],
+                    "intent": "music_settings",
+                    "uttKB": []
+                }
+            ],
+            "utt2spk": "slurp_FE-128"
+        }
+    }
+}
