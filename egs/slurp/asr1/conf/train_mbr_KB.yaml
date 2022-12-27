@@ -1,0 +1,79 @@
+# minibatch related
+batch-size: 36
+maxlen-in: 512
+maxlen-out: 150
+maxioratio: 300
+minioratio: 6
+
+# optimization related
+criterion: loss
+early-stop-criterion: "validation/main/loss"
+save-interval-iters: 0
+sortagrad: 0
+opt: adadelta
+epochs: 100
+patience: 3
+eps: 5e-11
+accum-grad: 5
+# ema-decay: 0.999
+
+# network architecture
+etype: vggblstmp
+elayers: 4
+eunits: 1024
+eprojs: 2048
+subsample: "1_1_1_1"
+dropout-rate: 0.1
+
+## decoder related
+dtype: lstm
+dlayers: 2
+dunits: 1024
+dropout-rate-decoder: 0.1
+dropout-rate-embed-decoder: 0.1
+
+## joint network related
+joint-dim: 1024
+
+# transducer related
+model-module: "espnet.nets.pytorch_backend.e2e_asr_transducer:E2E"
+include-blank: true
+trans-type: warp-rnnt
+# debug
+report-interval-iters: 1
+
+# KB related
+meetingpath: /home/gs534/rds/hpc-work/work/Librispeech/data_100/RNNTKBs/LibriKBRare_unigram600suffix/rareword_f15.txt
+meetingKB: true
+dictfile: /home/gs534/rds/hpc-work/work/Librispeech/data_100/RNNTKBs/bpe_dict_unigram600suffix.txt
+KBlextree: true
+PtrGen: true
+# PtrKBin: true
+PtrSche: 5
+# init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/rnnt_exp_100/Librispeech100_baseline_rnnt/results/baseline.ep.12
+# init-full-model: /home/gs534/rds/hpc-work/work/AMI/rnnt_exp/ami_train_rnnt_KB100_drop_no_epsdecay/results/model.loss.best
+acousticonly: true
+attn_dim: 256
+KBmaxlen: 500
+KBminlen: 500
+randomKBsample: true
+# DBinput: true
+# DBmask: 0.1
+DBdrop: 0.0
+# dynamicKBs: 0
+# smoothprob: 0.0
+
+# MBR
+mbrloss: true
+mbrbeam: 5
+mbrnbest: 5
+mbrlambda: 1.0
+# mbrGT: true
+mweweight: 1.0
+mbrrareweight: 5.0
+cfm-mbr-start: 0
+# use-wp-errors: true
+# init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/rnnt_exp_100/Librispeech100_baseline_rnnt/results/baseline.ep.13
+init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/rnnt_exp_100/Librispeech100_rnnt_KB500_nodrop/results/tcpgen.ep.7
+# init-full-model: /home/gs534/rds/hpc-work/work/AMI/rnnt_exp/ami_train_baseline_rnnt_no_epsdecay/results/model.loss.best
+# wrt-alignments: true

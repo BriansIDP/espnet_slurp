@@ -1,0 +1,35 @@
+batchsize: 0
+beam-size: 30
+penalty: 0.0
+maxlenratio: 0.0
+minlenratio: 0.0
+ctc-weight: 0.0
+lm-weight: 0.25
+coverage-penalty: 0.01
+eos-max-logit-delta: 1.0
+
+# select: true
+# topk: 500
+# sel-lm: /home/gs534/rds/hpc-work/work/slurp/lm/exp/SLURP_rare/model.SLURP_rare.pt
+# sel-lm: /home/gs534/rds/hpc-work/work/slurp/lm/exp/SLURP_rare_class0.1/model.SLURP_rare_class0.1.pt
+# nbestKB: true
+# ilme: 0.0
+
+# Slot KB pred
+classfile: /home/gs534/rds/hpc-work/work/slurp/data/KBs/word_onts/ontologymerge_entf30_unigram600suffix_subsettest.json
+# classfile: /home/gs534/rds/hpc-work/work/slurp/data/KBs/word_onts/word_ontology_f30.json
+classorder: /home/gs534/rds/hpc-work/work/slurp/data/SLU/slottypes.txt
+topk: 5
+# classlm: true
+# # # unigram: /home/gs534/project/CharLM/data/SLURP/wordfreq.json
+# # # penalty-factor: 0.3
+slotlist: true
+# # # # oracletext: true
+entity: true
+#
+rnnlm-layer: 2
+rnnlm-unit: 2048
+embed-unit: 512
+# est-lm: /home/gs534/rds/hpc-work/work/AMI/LMmodels/model.AMI_bpe200_1_1024_512_discounting.pt
+# estlm-factor: 0.25
+# oracletext: true

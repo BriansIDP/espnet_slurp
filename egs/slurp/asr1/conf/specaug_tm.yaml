@@ -1,0 +1,13 @@
+process:
+  # these three processes are a.k.a. SpecAugument
+  - type: "freq_mask"
+    F: 30
+    n_mask: 2
+    inplace: true
+    replace_with_zero: true
+  - type: "time_mask"
+    T: 40
+    max_ratio: 0.05
+    n_mask: 10
+    inplace: true
+    replace_with_zero: true

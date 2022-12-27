@@ -1,0 +1,132 @@
+# network architecture
+backend: pytorch
+model-module: espnet.nets.pytorch_backend.e2e_asr_cfmlas:E2E
+# encoder related
+elayers: 16
+eunits: 2048
+eprojs: 512 # this must equal to transformer-adim
+transformer-adim: 512
+transformer-aheads: 4
+transformer-attn-dropout-rate: 0.0
+transformer-input-layer: conv2d
+transformer-encoder-activation-type: swish
+transformer-encoder-pos-enc-layer-type: rel_pos
+transformer-encoder-selfattn-layer-type: rel_selfattn
+macaron-style: true
+use-cnn-module: true
+cnn-module-kernel: 31
+# decoder related
+dlayers: 1
+dunits: 1024
+# attention related
+adim: 1024
+atype: location
+aconv-chans: 10
+aconv-filts: 100
+
+# hybrid CTC/attention
+mtlalpha: 0.0
+
+# label smoothing
+lsm-type: unigram
+lsm-weight: 0.1
+dropout-rate: 0.1
+dropout-rate-decoder: 0.1
+weight-decay: 0.0
+# ema-decay: 0.999
+context-residual: true
+
+# minibatch related
+batch-size: 20
+maxlen-in: 512
+maxlen-out: 150
+maxioratio: 300
+minioratio: 6
+
+# optimization related
+sortagrad: 0
+accum-grad: 6
+grad-clip: 5
+opt: noam
+epochs: 30
+patience: 0
+# weight-noise-std: 0.00
+# weight-noise-start: 20000
+transformer-lr: 0.31
+transformer-warmup-steps: 1500
+
+# scheduled sampling option
+sampling-probability: 0.0
+report-interval-iters: 20
+# freeze-mod: enc,att
+
+# KB related
+meetingpath: /home/gs534/rds/hpc-work/work/slurp/data/KBs/SLURPKB_unigram600suffix/rarewords_f30.txt
+meetingKB: true
+dictfile: /home/gs534/rds/hpc-work/work/slurp/data/KBs/bpe_dict_unigram600suffix.txt
+lm-odim: 256
+KBlextree: true
+PtrGen: true
+PtrSche: 31
+# PtrKBin: true
+init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/exp/librispeech_train_conformer_KB1000_KB256_spec_drop_gcn2l/results/model.acc.best
+# # init-full-model: /home/gs534/rds/hpc-work/work/slurp/exp/slurp_conformer_KB200_f30_finetuneLibri_retrain/results/model.acc.best
+# init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/exp/librispeech_train_baseline_spec_conformer_960_continue/results/model.acc.best
+acousticonly: true
+attn_dim: 256
+KBmaxlen: 10
+KBminlen: 10
+randomKBsample: true
+# DBinput: true
+# DBmask: 0.5
+DBdrop: 0.3
+# dynamicKBs: 0
+smoothprob: 0.0
+# ILMTfactor: 0.1
+treetype: gcn2
+
+# MBR
+# mbrloss: true
+# mbrbeam: 5
+# mbrnbest: 5
+# mbrlambda: 1.0
+# mweweight: 0.5
+# mbrrareweight: 0.5
+# # use-wp-errors: true
+# cfm-mbr-start: 15
+# mbruseKB: false
+
+# MM
+modalitymatch: true
+mmfactor: 0.0
+# allseq: true
+# usedeconly: true
+# bertwpm: true
+pooling: index
+
+# SLU
+slotfile: /home/gs534/rds/hpc-work/work/slurp/data/SLU/slottypes_bpe.txt
+connection: /home/gs534/rds/hpc-work/work/slurp/data/SLU/connections_bpe.txt
+intentfile: /home/gs534/rds/hpc-work/work/slurp/data/SLU/intents.txt
+doslu: true
+slotfactor: 1.0
+intentfactor: 1.0
+ndistractors: 10
+
+# wordlevel: true
+jointrep: true
+robertamask: 0.0
+init-preLM: /home/gs534/rds/hpc-work/work/transformers/examples/pytorch/language-modeling/gpt2_output/SLURP_gpt2_wordLM0.0_intent0.0_slot1.0_pairs_full_parallel/gpt_state_dict
+# init-preLM: /home/gs534/rds/hpc-work/work/transformers/examples/pytorch/language-modeling/gpt2_output/SLURP_robertaword_wordLM0.0_intent1.0_slot1.0/roberta_state_dict
+# jointptrgen: true
+topnslot: 3
+ontology: /home/gs534/rds/hpc-work/work/slurp/data/KBs/word_onts/word_ontology_f30.json
+# ontology: /home/gs534/rds/hpc-work/work/slurp/data/KBs/word_onts/ontologymerge_entf30_unigram600suffix.json
+slotKB: true
+# copylossfac: 1.0
+# slusche: 15
+usegptgen: true
+fullslottext: true
+slottcpgen: true
+# classentity: true
+memnet: true
