@@ -42,7 +42,7 @@ from espnet.nets.pytorch_backend.rnn.encoders import encoder_for
 # gs534 - add KB classes
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeeting, KBmeetingTrain
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeetingTrainContext, Vocabulary
-from espnet.nets.pytorch_backend.KB_utils.SLU import SLUutils, SLUNet, SLUGenutils, SLUGenNet
+from espnet.nets.pytorch_backend.KB_utils.SLU import SLUGenutils, SLUGenNet
 from espnet.nets.pytorch_backend.KB_utils.wer import editDistance, getStepList
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.utils.fill_missing_args import fill_missing_args
@@ -237,8 +237,6 @@ class E2E(ASRInterface, torch.nn.Module):
                                     use_gpt_gen=self.use_gpt_gen, connector=self.sluproc.connector,
                                     jointptrgen=self.jointptrgen, nonestr=self.sluproc.none, history=self.gethistory,
                                     copylossfac=self.copylossfac, memnet=self.usememnet)
-            # if self.simpletod:
-            #     self.sluembed = torch.nn.Embedding(len(self.sluproc.char_list), args.dunits)
             if self.usetcpgen:
                 self.slunet.embed.weight = self.dec.embed.weight
                 self.slunet.ooKBemb.weight = self.dec.ooKBemb.weight
@@ -378,10 +376,6 @@ class E2E(ASRInterface, torch.nn.Module):
             if self.freeze_mod is not None and 'enc' in self.freeze_mod:
                 # stop updating batchnorm layer running stats
                 self.enc.encoders.eval() 
-            # if self.simpletod:
-            #     slotlabel, slotmask, slotmap, slottext, slotlist, clsprobmask = self.sluproc.get_simpletod_labels(
-            #         slots, ys_pad)
-            # else:
             slotlabel, slotmask, slotmap, slottext, slotlist, clsprobmask = self.sluproc.get_slot_labels(
                 slots, ys_pad, self.fullslottext, self.topn)
             slotlabel = to_device(self, slotlabel)
@@ -405,7 +399,6 @@ class E2E(ASRInterface, torch.nn.Module):
             # gs534 - meeting KB
             meeting_info = None
             if self.meeting_KB is not None and not self.useslotKB:
-                # self.meeting_KB.DBdrop = self.DBdrop if self.training else 0
                 meeting_info = self.meeting_KB.get_meeting_KB(meetings, ilens.size(0))
 
             # Modality Matching
@@ -418,9 +411,6 @@ class E2E(ASRInterface, torch.nn.Module):
                 if self.domm or self.jointrep:
                     newhidden, slothidden = self.pretrained_LM(orig_text, slotlabel=slottext, slotmap=slotmap,
                                                                training=self.jointrep, history=history)
-                # if self.simpletod:
-                #     mmembs = self.sluembed(slotlabel)
-                # else:
                 mmembs = self.dec.embed(slotlabel)
 
                 if self.useslotKB:
@@ -455,8 +445,6 @@ class E2E(ASRInterface, torch.nn.Module):
                         for i, slotwordlist in enumerate(slotbiasinglists):
                             lextree = self.meeting_KB.get_tree(slotwordlist)
                             if lextree[0] != {}:
-                                # self.slunet.encode_tree(lextree)
-                                # with torch.no_grad():
                                 self.dec.encode_tree(lextree)
                             ontology_trees.append(lextree)
                 if self.useslotKB and self.dec.epoch > self.dec.PtrSche:
@@ -700,7 +688,6 @@ class E2E(ASRInterface, torch.nn.Module):
                 pasttext = history[0]+orig_text.lower() if history is not None else orig_text.lower()
                 # Encode second tree
                 if self.slunet.tcpgen and self.meeting_KB is not None:
-                    # if recog_args.select and self.meeting_KB is not None:
                     trees = []
                     for k, wlist in enumerate(y[0]['entities']):
                         if bhist != [] and bhist[k] != []:
@@ -718,6 +705,7 @@ class E2E(ASRInterface, torch.nn.Module):
                 else:
                     trees = None
                 print(y[0]['entities'])
+                ### Commented lines are for beam search decoding
                 # slots = self.slunet.inference_beam(y[0]['hidden_states'], self.dec.embed, mmembs, beam=2,
                 #                                    yseq=y[0]['yseq'][1:-1], gpthidden=newhidden, nonepenalty=0.0,
                 #                                    slothidden=slothidden, slotids=self.sluproc.slotqueries,

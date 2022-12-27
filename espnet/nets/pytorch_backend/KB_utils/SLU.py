@@ -736,7 +736,6 @@ class SLUGenNet(torch.nn.Module):
             ids = []
             idx = len(embeddings)
             if wordpiece is not None:
-                # ey = self.embed(to_device(self, torch.LongTensor([wordpiece])))
                 ey = self.embed.weight[wordpiece].unsqueeze(0)
                 embeddings.append(self.dropout(ey))
             for newpiece, values in lextree[0].items():
@@ -830,7 +829,6 @@ class SLUGenNet(torch.nn.Module):
             one_hot[ind] = 1
             back_transform.append(one_hot)
         back_transform = torch.Tensor(back_transform)
-        # step_embs = torch.einsum('jk,km->jm', back_transform, meeting_KB)
         step_embs = torch.cat([step_embs, self.ooKBemb.weight], dim=0).unsqueeze(0)
         step_mask = torch.zeros(back_transform.size(0)).byte().unsqueeze(0)
         step_embs = step_embs.unsqueeze(0)
@@ -1020,8 +1018,6 @@ class SLUGenNet(torch.nn.Module):
         carry_hidden = list(zip(*carry_hidden))
         carry_hidden[0] = torch.cat(carry_hidden[0], dim=0).transpose(0, 1)[torch.arange(final_ids.size(0)), final_ids].unsqueeze(0)
         carry_hidden[1] = torch.cat(carry_hidden[1], dim=0).transpose(0, 1)[torch.arange(final_ids.size(0)), final_ids].unsqueeze(0)
-        # carry_hidden[0] = torch.index_select(carry_hidden[0][torch.arange(final_ids.size(0)), final_ids], 0, slotmap).unsqueeze(0)
-        # carry_hidden[1] = torch.index_select(carry_hidden[1][torch.arange(final_ids.size(0)), final_ids], 0, slotmap).unsqueeze(0)
 
         queryemb = self.dropout(queryemb)
         slot_output, _ = self.generator(queryemb, carry_hidden)
@@ -1105,21 +1101,14 @@ class SLUGenNet(torch.nn.Module):
                 _, reset_hidden = self.generator(torch.cat([d_hidden, ptr_gen[:,i:i+1]], dim=-1).unsqueeze(0), init_hidden)
             if self.use_gpt_gen:
                 slotgptemb = self.remap_query(slothidden[i:i+1], [slotids[i][1:]], pad_id=0)
-                # query = self.slotjointproj(torch.cat([query, slotgptemb.squeeze(0)], dim=-1))
                 if self.residual:
                     query_pad = query.new_zeros(query.size(0), self.dunits-self.embdim)
-                    # ilm
-                    # query_ilm = torch.cat([query, query_pad, slotgptemb.squeeze(0)], dim=-1)
                     query = torch.cat([query, query_pad, slotgptemb.squeeze(0)], dim=-1)
                 else:
                     query = torch.cat([query, slotgptemb.squeeze(0)], dim=-1)
             if self.jointptrgen and ptr_gen is not None:
                 query = torch.cat([query, query.new_zeros(query.size(0), 1)], dim=-1)
-                # ilm
-                # query_ilm = torch.cat([query_ilm, query.new_zeros(query.size(0), 1)], dim=-1)
             next_output, query_init_hidden = self.generator(query.unsqueeze(0), reset_hidden)
-            # ilm
-            # ilm_output, query_ilm_hidden = self.generator(query_ilm.unsqueeze(0), init_hidden)
 
             # TCPGen for slot value generation
             if self.tcpgen and trees is not None:
@@ -1129,8 +1118,6 @@ class SLUGenNet(torch.nn.Module):
                 else:
                     next_output = torch.softmax(self.decoder(next_output[0, -1]), dim=-1)
                     ptr_gen_complement = ptr_dist[-1:] * p_gen
-                    # ilm
-                    # ilm_output = torch.softmax(self.decoder(ilm_output[0, -1]), dim=-1)# ** 0.1
                     next_output = (1 - p_gen + ptr_gen_complement) * next_output + ptr_dist[:-1] * p_gen
             else:
                 next_output = self.decoder(next_output[0, -1])
@@ -1149,12 +1136,9 @@ class SLUGenNet(torch.nn.Module):
                         tok_emb = torch.cat([tok_emb, gptemb], dim=-1)
                     else:
                         tok_emb = torch.cat([tok_emb, tok_emb.new_zeros(slotgptemb.size(-1))], dim=-1)
-                    # tok_emb = self.slotjointproj(tok_emb)
                 if self.jointptrgen and ptr_gen is not None:
                     tok_emb = torch.cat([tok_emb, tok_emb.new_zeros(1)])
                 next_output, query_init_hidden = self.generator(tok_emb.unsqueeze(0).unsqueeze(0), query_init_hidden)
-                # ilm
-                # ilm_output, query_ilm_hidden = self.generator(tok_emb.unsqueeze(0).unsqueeze(0), query_ilm_hidden)
                 # TCPGen for slot value generation
                 if self.tcpgen and trees is not None:
                     ptr_dist, p_gen, treetrack, KBemb = self.forward_tcpgen_inference(outputtok.item(), treetrack, trees[i], next_output[0, -1])
@@ -1164,9 +1148,6 @@ class SLUGenNet(torch.nn.Module):
                         next_output = torch.softmax(self.decoder(next_output[0, -1]), dim=-1)
                         ptr_gen_complement = ptr_dist[-1:] * p_gen
                         next_output = (1 - p_gen + ptr_gen_complement) * next_output + ptr_dist[:-1] * p_gen
-                        # ilm
-                        # next_output = torch.log(next_output) - 0.1 * torch.log_softmax(ilm_output, dim=-1)
-                    # print(ptr_dist[:-1].sum() * p_gen)
                 else:
                     next_output = self.decoder(next_output[0, -1])
 
