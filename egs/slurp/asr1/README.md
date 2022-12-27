@@ -9,10 +9,17 @@ Two example utterances having those labels can be found in `dump/train/deltafals
 ## Training ##
 Use the train.sh to train the model. In the paper, ASR is pretrained on Librispeech 960h data, and the model parameters are used to initialise the ASR part in KA2G. Also there is an option to fine-tune the PLM on SLURP training data first, and use the fine-tuned model parameters to initialise the PLM in KA2G.
 
+Versions used in the paper:
+`PyTorch: 1.12.0`
+`Transformers: `
+
 Relevant files:
 
 `espnet/espnet/nets/pytorch_backend/e2e_asr.py`: main model definition file \
 `espnet/espnet/nets/pytorch_backend/KB_utils/KB.py`: Biasing list extraction and organising into prefix-trees \
 `espnet/espnet/nets/pytorch_backend/KB_utils/SLU.py`: Audio-grounded SVG and SVG-TCPGen \
 `espnet/espnet/nets/pytorch_backend/modality/plm.py`: PLM definition and word-boundary alignment \
-`espnet/espnet/nets/pytorch_backend/rnn/decoder.py`: Attention-based encoder decoder model with TCPGen \
+`espnet/espnet/nets/pytorch_backend/rnn/decoder.py`: Attention-based encoder decoder model with TCPGen 
+
+## Inference ##
+An example array job submission file using slurm is `slurm_submit_cpu_cclake` which executes `decode_bpe.sh`.
