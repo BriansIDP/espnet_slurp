@@ -15,13 +15,16 @@ asr_config=conf/train_asr.yaml
     --lang en \
     --ngpu 1 \
     --use_lm false \
-    --nbpe 5000 \
+    --nbpe 600 \
     --token_type word\
-    --feats_type raw\
+    --audio_format flac\
+    --feats_type fbank_pitch\
     --max_wav_duration 30 \
     --feats_normalize utterance_mvn\
     --inference_nj 8 \
     --inference_asr_model valid.acc.ave_10best.pth\
+    --stage 1 \
+    --stop_stage 6 \
     --asr_config "${asr_config}" \
     --train_set "${train_set}" \
     --valid_set "${valid_set}" \
