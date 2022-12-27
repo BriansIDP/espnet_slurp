@@ -4,7 +4,7 @@
 <br />
 <div align="center">
   <a>
-    <img src="modelstructure.pdf" alt="pipeline" width="800" height="180">
+    <img src="modelstructure.png" alt="pipeline" width="1000" height="500">
   </a>
   <h3 align="center">The KA2G Framework for Knowledge-Aware Audio-Grounded Generative Slot Filling</h3>
   </p>
@@ -19,9 +19,9 @@ Two example utterances having those labels can be found in `dump/train/deltafals
 ## Training ##
 Use the train.sh to train the model. In the paper, ASR is pretrained on Librispeech 960h data, and the model parameters are used to initialise the ASR part in KA2G. Also there is an option to fine-tune the PLM on SLURP training data first, and use the fine-tuned model parameters to initialise the PLM in KA2G.
 
-Versions used in the paper:
-`PyTorch: 1.12.0`
-`Transformers: `
+Versions used in the paper:\
+`PyTorch 1.12.0` \
+`Transformers 4.20.1`
 
 Relevant files:
 
