@@ -4,7 +4,7 @@
 <br />
 <div align="center">
   <a>
-    <img src="modelstructure.png" alt="pipeline" width="1000" height="500">
+    <img src="modelstructure-1.png" alt="pipeline" width="1000" height="500">
   </a>
   <h3 align="center">The KA2G Framework for Knowledge-Aware Audio-Grounded Generative Slot Filling</h3>
   </p>
