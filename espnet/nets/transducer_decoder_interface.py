@@ -25,7 +25,6 @@ class Hypothesis:
     lextree: dict = None
     p_gen: List[float] = None
     trace: List[int] = None
-    estlm_state: Tuple[torch.Tensor, Optional[torch.Tensor]] = None
     prev_hid: tuple = None
 
 

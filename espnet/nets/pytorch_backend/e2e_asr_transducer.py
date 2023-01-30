@@ -292,7 +292,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # KB related
         bpe = ('<space>' not in args.char_list) # hack here for bpe flag
-        self.vocabulary = Vocabulary(args.dictfile, bpe) if args.dictfile != '' else None
+        self.vocabulary = Vocabulary(args.dictfile, bpe) if getattr(args, 'dictfile', '') != '' else None
         # gs534 - create lexicon tree
         self.meeting_KB = None
         self.n_KBs = getattr(args, 'dynamicKBs', 0)
@@ -304,9 +304,8 @@ class E2E(ASRInterface, torch.nn.Module):
         self.init_from = getattr(args, 'init_full_model', None)
         self.smoothprob = getattr(args, 'smoothprob', 1.0)
         self.KBin = getattr(args, 'PtrKBin', 1.0)
-        self.treetype = getattr(args, 'treetype', '')
-        self.tree_hid = getattr(args, 'treehid', 0)
-        if args.meetingKB and args.meetingpath != '':
+        self.prefix = getattr(args, "prefix", False)
+        if getattr(args, 'meetingKB', None) and getattr(args, 'meetingpath', '') != '':
             if self.n_KBs == 0:
                 if args.randomKBsample:
                     self.meeting_KB = KBmeetingTrain(self.vocabulary, args.meetingpath, args.char_list, bpe,
@@ -321,27 +320,17 @@ class E2E(ASRInterface, torch.nn.Module):
             self.dropout_KB = torch.nn.Dropout(p=args.dropout_rate_embed_decoder)
             # Use pointer generator
             if self.PtrGen:
-                self.embdim = args.dec_embed_dim
-                # Define graph neural net parameters
-                self.tree_hid = self.embdim if self.tree_hid == 0 else self.tree_hid
-                if self.treetype.startswith('gcn'):
-                    self.gcn_l1 = torch.nn.Linear(self.embdim, self.tree_hid)
-                    self.gcn_l2 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-                    if self.treetype[-1] == '3':
-                        self.gcn_l3 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-                else:
-                    self.recursive_proj = torch.nn.Linear(self.embdim+self.tree_hid, self.tree_hid)
-
-                self.ooKBemb = torch.nn.Embedding(1, self.tree_hid)
+                embdim = args.dec_embed_dim
+                self.ooKBemb = torch.nn.Embedding(1, embdim)
                 self.Qproj_char = torch.nn.Linear(args.dec_embed_dim, self.attn_dim)
                 # self.Qproj_char = torch.nn.Linear(decoder_out, self.attn_dim)
                 self.Qproj_acoustic = torch.nn.Linear(encoder_out, self.attn_dim)
-                self.Kproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
+                self.Kproj = torch.nn.Linear(embdim, self.attn_dim)
                 self.pointer_gate = torch.nn.Linear(self.attn_dim+args.joint_dim, 1)
 
         self.joint_network = JointNetwork(
             odim, encoder_out, decoder_out, args.joint_dim, args.joint_activation_type,
-            useKB=(args.meetingKB and (self.DBinput or self.KBin)), plm_dim=self.attn_dim
+            useKB=(getattr(args, 'meetingKB', None) and (self.DBinput or self.KBin)), plm_dim=self.attn_dim
         )
 
         if hasattr(self, "most_dom_list"):
@@ -380,7 +369,6 @@ class E2E(ASRInterface, torch.nn.Module):
         self.rareweight = getattr(args, 'mbrrareweight', 0.0)
         self.mwe_factor = getattr(args, 'mweweight', 1.0)
         self.use_wp_errors = getattr(args, 'use_wp_errors', False)
-        self.cfm_mbr_start = getattr(args, 'cfm_mbr_start', 0)
         self.wrt_alignments = getattr(args, 'wrt_alignments', False)
 
         if training:
@@ -492,22 +480,7 @@ class E2E(ASRInterface, torch.nn.Module):
             if name in bs_joint_state:
                 bs_joint_state[name].copy_(param.data)
 
-    def forward_encoder(self, xs_pad, ilens):
-        xs_pad = xs_pad[:, : max(ilens)]
-        if "custom" in self.etype:
-            src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
-
-            _hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
-        else:
-            _hs_pad, hs_mask, _ = self.enc(xs_pad, ilens)
-
-        if self.use_aux_task:
-            hs_pad, aux_hs_pad = _hs_pad[0], _hs_pad[1]
-        else:
-            hs_pad, aux_hs_pad = _hs_pad, None
-        return hs_pad, aux_hs_pad, hs_mask
-
-    def forward(self, xs_pad, ilens, ys_pad, meetings=None, orig_text=None, intents=None, slots=None):
+    def forward(self, xs_pad, ilens, ys_pad, meetings=None):
         """E2E forward.
 
         Args:
@@ -520,7 +493,19 @@ class E2E(ASRInterface, torch.nn.Module):
 
         """
         # 1. encoder
-        hs_pad, aux_hs_pad, hs_mask = self.forward_encoder(xs_pad, ilens)
+        xs_pad = xs_pad[:, : max(ilens)]
+
+        if "custom" in self.etype:
+            src_mask = make_non_pad_mask(ilens.tolist()).to(xs_pad.device).unsqueeze(-2)
+
+            _hs_pad, hs_mask = self.encoder(xs_pad, src_mask)
+        else:
+            _hs_pad, hs_mask, _ = self.enc(xs_pad, ilens)
+
+        if self.use_aux_task:
+            hs_pad, aux_hs_pad = _hs_pad[0], _hs_pad[1]
+        else:
+            hs_pad, aux_hs_pad = _hs_pad, None
 
         # 1.5. transducer preparation related
         ys_in_pad, ys_out_pad, target, pred_len, target_len = prepare_loss_inputs(
@@ -543,32 +528,25 @@ class E2E(ASRInterface, torch.nn.Module):
             # self.meeting_KB.DBdrop = self.DBdrop if self.training else 0
             meeting_info = self.meeting_KB.get_meeting_KB(meetings, ilens.size(0))
             # get padded text sequence
-            ys_ptrgen_pad = torch.cat([ys_in_pad[:, 0:1], ys_pad], dim=-1)
+            ys_in = [[self.sos] + y[y != self.ignore_id].tolist() for y in ys_pad]
 
-            # get tree net encodings
-            self.encode_tree(meeting_info[2][0])
-            trees = meeting_info[2]
-            p_gen_mask_all = []
+            if self.prefix:
+                lex_masks, ptr_mask = self.get_lex_mask_prefix(ys_in, meeting_info[2], ys_in_pad.size(-1))
+            else:
+                lex_masks, ptr_mask = self.get_lex_masks(ys_in, meeting_info[2], ys_in_pad.size(-1))
+                import pdb; pdb.set_trace()
+            lex_masks = to_device(self, lex_masks.byte())
 
             if self.DBinput:
                 hs_plm = self.dropout_KB(self.DBembed((1-lex_masks[:, :, :-1].float())).unsqueeze(1))
 
-            if self.PtrGen:
-                query_acoustic = self.Qproj_acoustic(hs_pad) # nutts * T * attn_dim
-                KBembedding = []
-                ptr_dist = []
-                for i in range(ys_in_pad.size(1)):
-                    step_mask, trees, p_gen_mask, step_embs, back_transform = self.get_lextree_step_embs(
-                        ys_ptrgen_pad[:, i], trees, meeting_info[2])
-                    p_gen_mask_all.append(p_gen_mask)
-                    query_char = self.dec.dropout_embed(self.dec.embed(ys_in_pad[:,i])) # nutts * embdim
-                    query_char = self.Qproj_char(query_char).unsqueeze(1) # nutts * 1 * attn_dim
-                    query = query_char + query_acoustic # nutts * T * attn_dim
-                    KBembedding_i, ptr_dist_i = self.get_meetingKB_emb_map(query, step_mask, step_embs, back_transform)
-                    KBembedding.append(KBembedding_i.unsqueeze(2)) # nutts * T * attn_dim
-                    ptr_dist.append(ptr_dist_i.unsqueeze(2)) # nutts * T * nbpe
-                KBembedding = torch.cat(KBembedding, dim=2)
-                ptr_dist = torch.cat(ptr_dist, dim=2)
+            if self.meeting_KB is not None and self.PtrGen:
+                query_char = self.dec.dropout_embed(self.dec.embed(ys_in_pad)) # nutts * U * embdim
+                # query_char = self.dec.dropout_embed(pred_pad) # nutts * U * decoder_out
+                query_char = self.Qproj_char(query_char).unsqueeze(1) # nutts * 1 * U * attn_dim
+                query_acoustic = self.Qproj_acoustic(hs_pad).unsqueeze(2) # nutts * T * 1 * attn_dim
+                query = query_char + query_acoustic # nutts * T * U * attn_dim
+                KBembedding, ptr_dist = self.get_KB_emb(query, lex_masks)
                 if self.KBin and not self.DBinput:
                     hs_plm = self.dropout_KB(KBembedding)
 
@@ -578,8 +556,7 @@ class E2E(ASRInterface, torch.nn.Module):
         # Process pointer generator
         if self.meeting_KB is not None and self.PtrGen and self.dec.epoch >= self.PtrSche:
             p_gen = torch.sigmoid(self.pointer_gate(torch.cat((joint_activations, KBembedding), dim=-1)))
-            ptr_mask = to_device(self, torch.tensor(p_gen_mask_all)).t()
-            p_gen = p_gen.masked_fill(ptr_mask.unsqueeze(1).unsqueeze(-1).bool(), 0) * self.smoothprob
+            p_gen = p_gen.masked_fill(ptr_mask.bool().unsqueeze(1).unsqueeze(-1), 0) * self.smoothprob
 
         # 3. loss computation
         loss_trans = self.criterion(z, target, pred_len, target_len, ptr_dist=ptr_dist, p_gen=p_gen)
@@ -588,7 +565,7 @@ class E2E(ASRInterface, torch.nn.Module):
         all_hyps = []
         self.mbrloss = 0
         mbrloss_unnorm = 0
-        if self.use_mbrloss and self.dec.epoch >= self.cfm_mbr_start:
+        if self.use_mbrloss:
             if self.wrt_alignments:
                 # self.synchronise_params()
                 with torch.no_grad():
@@ -698,8 +675,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
         return hs.squeeze(0)
 
-    def recognize(self, x, beam_search, meetings=None, estlm=None, estlm_factor=0.0,
-                  prev_hid=None):
+    def recognize(self, x, beam_search, meetings=None, prev_hid=None):
         """Recognize input features.
 
         Args:
@@ -717,12 +693,11 @@ class E2E(ASRInterface, torch.nn.Module):
         else:
             h = self.encode_rnn(x)
 
-        nbest_hyps = beam_search(h, meetings=meetings, estlm=estlm, estlm_factor=estlm_factor, 
-                                 prev_hid=None)
+        nbest_hyps = beam_search(h, meetings=meetings, prev_hid=None)
 
         return [asdict(n) for n in nbest_hyps]
 
-    def calculate_all_attentions(self, xs_pad, ilens, ys_pad, meetings=None):
+    def calculate_all_attentions(self, xs_pad, ilens, ys_pad):
         """E2E attention calculation.
 
         Args:
@@ -756,154 +731,95 @@ class E2E(ASRInterface, torch.nn.Module):
 
         return ret
 
-    def get_lextree_encs(self, lextree, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-            ey = self.dropout_KB(ey)
-            lextree.append(ey)
-            return ey
-        elif lextree[1] == -1:
-            wordpieces = []
-            for newpiece, values in lextree[0].items():
-                wordpieces.append(self.get_lextree_encs(values, newpiece))
-            wordpiece_h = torch.cat(wordpieces, dim=0).sum(dim=0).unsqueeze(0)
-            if wordpiece is not None:
-                ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-                ey = self.dropout_KB(ey)
-                wordpiece_h = self.recursive_proj(torch.cat([ey, wordpiece_h], dim=-1))
-                wordpiece_h = torch.relu(wordpiece_h)
-                # wordpiece_h = torch.sigmoid(wordpiece_h)
-                lextree.append(wordpiece_h)
-            return wordpiece_h
-
-    def get_lextree_encs_gcn(self, lextree, embeddings, adjacency, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = len(embeddings)
-            # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-            ey = self.dec.embed.weight[wordpiece].unsqueeze(0)
-            embeddings.append(self.dropout_KB(ey))
-            adjacency.append([idx])
-            lextree.append([])
-            lextree.append(idx)
-            return idx
-        elif lextree[1] == -1 and lextree[0] != {}:
-            ids = []
-            idx = len(embeddings)
-            if wordpiece is not None:
-                # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-                ey = self.dec.embed.weight[wordpiece].unsqueeze(0)
-                embeddings.append(self.dropout_KB(ey))
-            for newpiece, values in lextree[0].items():
-                ids.append(self.get_lextree_encs_gcn(values, embeddings, adjacency, newpiece))
-            if wordpiece is not None:
-                adjacency.append([idx] + ids)
-            lextree.append(ids)
-            lextree.append(idx)
-            return idx
-
-    def forward_gcn(self, lextree, embeddings, adjacency):
-        n_nodes = len(embeddings)
-        embeddings = torch.cat(embeddings, dim=0)
-        adjacency_mat = embeddings.new_zeros(n_nodes, n_nodes)
-        for node in adjacency:
-            for neighbour in node:
-                adjacency_mat[node[0], neighbour] = 1.0
-        degrees = torch.diag(torch.sum(adjacency_mat, dim=-1) ** -0.5)
-        nodes_encs = self.gcn_l1(embeddings)
-        adjacency_mat = torch.einsum('ij,jk->ik', degrees, adjacency_mat)
-        adjacency_mat = torch.einsum('ij,jk->ik', adjacency_mat, degrees)
-        nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        if self.treetype != 'gcn' and int(self.treetype[-1]) > 1:
-            nodes_encs = self.gcn_l2(nodes_encs)
-            nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-            if int(self.treetype[-1]) > 2:
-                nodes_encs = self.gcn_l3(nodes_encs)
-                nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        return nodes_encs
-
-    def fill_lextree_encs_gcn(self, lextree, nodes_encs, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = lextree[4]
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-        elif lextree[1] == -1 and lextree[0] != {}:
-            idx = lextree[4]
-            for newpiece, values in lextree[0].items():
-                self.fill_lextree_encs_gcn(values, nodes_encs, newpiece)
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-
-    def encode_tree(self, prefixtree):
-        if self.treetype.startswith('gcn'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            nodes_encs = self.forward_gcn(prefixtree, embeddings, adjacency)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
-        else:
-            self.get_lextree_encs(prefixtree)
-
-    def get_meetingKB_emb_map(self, query, meeting_mask, meeting_embs, back_transform):
-        """
-        query: (nutts, T, attn_dim)
-        meeting_embs: (nutts, n_nodes, embdim)
-        meeting_mask: (nutts, n_nodes)
-        back_transform: (nutts, n_nodes, nbpes)
-
-        return: (nutts, T, nbpes)
-        """
-        meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
-        KBweight = torch.einsum('ijk,itk->itj', meeting_KB, query)
-        KBweight = KBweight / math.sqrt(query.size(-1))
-        KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
-        KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
-        if meeting_embs.size(1) > 1:
-            KBembedding = torch.einsum('ijk,itj->itk', meeting_KB[:,:-1,:], KBweight[:,:,:-1])
-        else:
-            KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
-        KBweight = torch.einsum('ijk,itj->itk', back_transform, KBweight)
-        return KBembedding, KBweight
-
-    def get_lextree_step_embs(self, char_ids, trees, origTries):
-        ooKB_id = len(self.char_list)
-        maxlen = 0
-        index_list = []
-        new_trees = []
+    def get_lex_masks(self, ylist, origTries, maxlen):
+        batch_masks = torch.ones(len(ylist), maxlen, len(self.char_list) + 1)
         p_gen_mask = []
-        step_embs = []
-        for i, vy in enumerate(char_ids):
-            new_tree = trees[i][0]
-            vy = vy.item()
-            if vy in [self.blank_id] or self.char_list[vy].endswith('▁'):
-                new_tree = origTries[i]
-                p_gen_mask.append(0)
-            elif vy not in new_tree:
-                new_tree = [{}]
-                p_gen_mask.append(1)
-            else:
-                new_tree = new_tree[vy]
-                p_gen_mask.append(0)
-            new_trees.append(new_tree)
-            if len(new_tree[0].keys()) > maxlen:
-                maxlen = len(new_tree[0].keys())
-            index_list.append(list(new_tree[0].keys()))
-            if len(new_tree) > 2:
-                step_embs.append(torch.cat([node[3] for key, node in new_tree[0].items()], dim=0))
-            else:
-                step_embs.append(to_device(self, torch.empty(0, self.tree_hid)))
-        maxlen += 1
-        step_mask = []
-        back_transform = to_device(self, torch.zeros(char_ids.size(0), maxlen, ooKB_id+1))
-        ones_mat = to_device(self, torch.ones(back_transform.size()))
-        for i, indices in enumerate(index_list):
-            step_mask.append(len(indices) * [0] + (maxlen - len(indices) - 1) * [1] + [0])
-            pad_embs = self.ooKBemb.weight.repeat(maxlen-len(indices), 1)
-            indices += [ooKB_id] * (maxlen-len(indices))
-            step_embs[i] = torch.cat([step_embs[i], pad_embs], dim=0)
-        step_mask = to_device(self, torch.tensor(step_mask).byte())
-        index_list = to_device(self, torch.LongTensor(index_list))
-        back_transform.scatter_(dim=-1, index=index_list.unsqueeze(-1), src=ones_mat)
-        step_embs = torch.stack(step_embs)
-        return step_mask, new_trees, p_gen_mask, step_embs, back_transform
+        for i, yseq in enumerate(ylist):
+            seq_of_inds = []
+            masks_list = []
+            next_char_dist = [] # for pointer generator
+            p_gen = [] # for pointer generator
+            lextree = origTries[i]
+            new_tree = lextree.copy()
+            for j, char_idx in enumerate(yseq):
+                new_tree = new_tree[0]
+                if char_idx in [self.eos] or self.char_list[char_idx].endswith('▁'):
+                    new_tree = lextree.copy()
+                    p_gen.append(0)
+                elif char_idx not in new_tree:
+                    new_tree = [{}]
+                    p_gen.append(1)
+                else:
+                    new_tree = new_tree[char_idx]
+                    p_gen.append(0)
+                batch_masks[i, j, list(new_tree[0].keys())] = 0
+                batch_masks[i, j, -1] = 0
+                # batch_masks[i, j, 0] = 0
+            # for pointer generator
+            if self.PtrGen:
+                p_gen_mask.append(p_gen + [1] * (maxlen - len(p_gen)))
+        if self.PtrGen:
+            p_gen_mask = to_device(self, torch.Tensor(p_gen_mask)).byte()
+
+        return batch_masks, p_gen_mask
+
+    def get_lex_mask_prefix(self, ylist, origTries, maxlen):
+        batch_masks = torch.ones(len(ylist), maxlen, len(self.char_list) + 1)
+        p_gen_mask = []
+        for i, yseq in enumerate(ylist):
+            seq_of_inds = []
+            masks_list = []
+            next_char_dist = [] # for pointer generator
+            p_gen = [] # for pointer generator
+            lextree = origTries[i]
+            new_tree = lextree.copy()
+            for j, char_idx in enumerate(yseq):
+                new_tree = new_tree[0]
+                if char_idx in [self.eos]: # or self.char_list[char_idx].endswith('?~V~A'):
+                    new_tree = lextree.copy()
+                    batch_masks[i, j, list(new_tree[0].keys())] = 0
+                elif self.char_list[char_idx].startswith('▁'):
+                    new_tree = lextree.copy()
+                    if char_idx not in new_tree[0]:
+                        batch_masks[i, j, list(new_tree[0].keys())] = 0
+                    else:
+                        new_tree = new_tree[0][char_idx]
+                        batch_masks[i, j, list(new_tree[0].keys())] = 0
+                        # if new_tree[1] != -1:
+                        batch_masks[i, j, list(lextree[0].keys())] = 0
+                else:
+                    if char_idx not in new_tree:
+                        new_tree = lextree.copy()
+                        batch_masks[i, j, list(new_tree[0].keys())] = 0
+                    else:
+                        new_tree = new_tree[char_idx]
+                        batch_masks[i, j, list(new_tree[0].keys())] = 0
+                        # if new_tree[1] != -1:
+                        batch_masks[i, j, list(lextree[0].keys())] = 0
+                p_gen.append(0)
+                batch_masks[i, j, -1] = 0
+            # for pointer generator
+            if self.PtrGen:
+                p_gen_mask.append(p_gen + [1] * (maxlen - len(p_gen)))
+        if self.PtrGen:
+            p_gen_mask = to_device(self, torch.Tensor(p_gen_mask)).byte()
+
+        return batch_masks, p_gen_mask
+
+    def get_KB_emb(self, query, meeting_mask):
+        meeting_KB = torch.cat([self.dec.embed.weight.data, self.ooKBemb.weight], dim=0)
+        # meeting_KB = torch.cat([self.joint_network.lin_out.weight.data, self.ooKBemb.weight], dim=0)
+        meeting_KB = self.dropout_KB(self.Kproj(meeting_KB))
+        # nutts * T * U * attn_dim, nbpe * attn_dim -> nutts * T * U * nbpe
+        KBweight = torch.einsum('ntuj,ij->ntui', query, meeting_KB)
+        KBweight = KBweight / math.sqrt(query.size(-1))
+        meeting_mask = to_device(self, meeting_mask).unsqueeze(1).repeat(1, KBweight.size(1), 1, 1)
+        KBweight.masked_fill_(meeting_mask.bool(), -1e9)
+        KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+        # nutts * T * U * nbpe, nbpe * attn_dim -> nutts * T * U * attn_dim
+        KBembedding = torch.einsum('ntui,ij->ntuj', KBweight[:,:,:,:-1], meeting_KB[:-1,:])
+        # KBembedding = torch.einsum('ntui,ij->ntuj', KBweight, meeting_KB)
+        return KBembedding, KBweight
 
     def get_rare_wpe(self, seq_true, KBwplist):
         align_list = []
@@ -1042,5 +958,5 @@ class E2E(ASRInterface, torch.nn.Module):
         z, joint_activations = self.joint_network(new_hs_pad.unsqueeze(2), pred_pad.unsqueeze(1), h_plm=hs_plm)
         loss_trans = self.criterion(z, target.to(z.device), pred_len.to(z.device), target_len.to(z.device),
             ptr_dist=ptr_dist, p_gen=p_gen, reduction='none')
-        loss_trans = (-loss_trans * scale_factors).sum() / len(results)
+        loss_trans = (-loss_trans * scale_factors).mean()
         return loss_trans

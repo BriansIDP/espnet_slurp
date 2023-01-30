@@ -84,6 +84,13 @@ def get_parser(parser=None, required=True):
         help="Resume the training from snapshot",
     )
     parser.add_argument(
+        "--resumedir",
+        "-rd",
+        default="",
+        nargs="?",
+        help="Resume the training from snapshot",
+    )
+    parser.add_argument(
         "--resume-eps",
         default=True,
         type=strtobool,
@@ -285,83 +292,12 @@ def get_parser(parser=None, required=True):
                        help='MBR training start epoch for Conformer')
     parser.add_argument('--use-wp-errors', default=False, type=strtobool,
                        help='Use word piece errors for MBR training')
-    parser.add_argument('--wrt-alignments', default=False, type=strtobool,
-                       help='MBR loss differenciate wrt alignments')
-    parser.add_argument('--treetype', default='', type=str,
-                       help='Type of GNN to use')
-    parser.add_argument('--treehid', default=0, type=int,
-                       help='Tree network hidden state dims')
+    parser.add_argument('--mbruseKB', default=False, type=strtobool,
+                       help='Use KB in MBR training')
     parser.add_argument('--sampler', default=False, type=strtobool,
                        help='Use sequential sampler for training dataloader')
-    parser.add_argument('--modalitymatch', default=False, type=strtobool,
-                       help='Use modality matching finetuning')
-    parser.add_argument('--robertadim', default=768, type=int,
-                       help='Roberta model output dimension')
-    parser.add_argument('--mmfactor', default=0.0, type=float,
-                       help='Scaling factor for the MM loss')
-    parser.add_argument('--pooling', default='', type=str,
-                        help='pooling mechanism used for mm training')
-    parser.add_argument('--doslu', default=False, type=strtobool,
-                       help='Whether or not using SLU training')
-    parser.add_argument('--intentfile', default='', type=str,
-                        help='Path to the intent labels')
-    parser.add_argument('--slotfile', default='', type=str,
-                        help='Path to the slot labels')
-    parser.add_argument('--slotfactor', default=0.0, type=float,
-                       help='Scaling factor for the slot filling loss')
-    parser.add_argument('--intentfactor', default=0.0, type=float,
-                       help='Scaling factor for the intent detection loss')
-    parser.add_argument('--wordlevel', default=False, type=strtobool,
-                       help='Whether or not to perform wordlevel SLU')
-    parser.add_argument('--jointrep', default=False, type=strtobool,
-                       help='Whether or not to perform joint representation for SLU')
-    parser.add_argument('--robertamask', default=0.0, type=float,
-                       help='Mask fraction for the roberta encodings')
-    parser.add_argument('--jointptrgen', default=False, type=strtobool,
-                       help='Whether or not to include TCPGen probs in SLU')
-    parser.add_argument('--slotKB', default=False, type=strtobool,
-                       help='Whether or not to use slot prediction for KB')
-    parser.add_argument('--ontology', default=None, type=str,
-                        help='Path to the slot-value file')
-    parser.add_argument('--topnslot', default=1, type=int,
-                       help='Number of shortlisted slots')
-    parser.add_argument('--mixup', default=0.0, type=float,
-                       help='ratio of text and audio input in a minibatch')
-    parser.add_argument('--classpost', default=False, type=strtobool,
-                       help='Whether or not to use class posterior')
-    parser.add_argument('--classpostfactor', default=0.0, type=float,
-                       help='Factor for class posterior')
-    parser.add_argument('--connection', default='', type=str,
-                        help='Path to the connecting symbols')
-    parser.add_argument('--ndistractors', default=1, type=int,
-                       help='number of negative samples for slot generation')
-    parser.add_argument('--init-preLM', default=None, type=str,
-                        help='Path to the pretrained LM')
-    parser.add_argument('--slusche', default=0, type=int,
-                        help='epochs before starting slu training')
-    parser.add_argument('--usegptgen', default=False, type=strtobool,
-                       help='Whether or not to use GPT for slot value generation')
-    parser.add_argument('--fullslottext', default=False, type=strtobool,
-                       help="GPT cover full slot text")
-    parser.add_argument('--gethistory', default=False, type=strtobool,
-                       help="GPT use history conversation")
-    parser.add_argument('--simpletod', default=False, type=strtobool,
-                       help="Use SimpleTOD way to generate belief states")
-    parser.add_argument('--copylossfac', default=0.0, type=float,
-                       help="factor weighing the copy loss")
-    parser.add_argument('--classentity', default=False, type=strtobool,
-                       help="Use entity biasing list or ontology")
-    parser.add_argument('--slottcpgen', default=False, type=strtobool,
-                       help="Use TCPGen for slot generation")
-    parser.add_argument('--memnet', default=False, type=strtobool,
-                       help="Use TCPGen and memory network for slot generation")
-    
-    parser.add_argument(
-        "--init-roberta-model",
-        default=None,
-        type=str,
-        help="Pre-trained ASR model to initialize all modules.",
-    )
+    parser.add_argument('--prefix', default=False, type=strtobool,
+                       help='Use prefix wordpiece model')
     
     # minibatch related
     parser.add_argument(

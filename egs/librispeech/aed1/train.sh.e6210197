@@ -1,0 +1,82 @@
+../../../espnet/bin/asr_train.py:24: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+  is_torch_1_2_plus = LooseVersion(torch.__version__) >= LooseVersion("1.2")
+2023-01-22 20:56:32,304 (asr_train:735) WARNING: Skip DEBUG/INFO messages
+2023-01-22 20:56:38,871 (ctc:43) WARNING: CTC was set to builtin due to PyTorch version.
+2023-01-22 20:56:47,167 (asr:640) WARNING: num. model params: 124,435,342 (num. trained: 124,435,342 (100.0%))
+2023-01-22 20:56:48,210 (io_utils:71) WARNING: [Experimental feature] Some preprocessing will be done for the mini-batch creation using Transformation(
+    0: FreqMask(F=27, n_mask=1, replace_with_zero=True, inplace=True)
+    1: TimeMask(T=40, max_ratio=0.05, n_mask=10, replace_with_zero=True, inplace=True))
+2023-01-22 20:56:48,211 (io_utils:71) WARNING: [Experimental feature] Some preprocessing will be done for the mini-batch creation using Transformation(
+    0: FreqMask(F=27, n_mask=1, replace_with_zero=True, inplace=True)
+    1: TimeMask(T=40, max_ratio=0.05, n_mask=10, replace_with_zero=True, inplace=True))
+Exception in main training loop: [Errno 2] No such file or directory: '/home/gs534/rds/hpc-work/work/Librispeech/dump/train_100/deltafalse/feats.24.ark'
+Traceback (most recent call last):
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/chainer/chainer/training/trainer.py", line 316, in run
+    update()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 342, in update
+    self.update_core()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 249, in update_core
+    batch = train_iter.next()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/dataset.py", line 110, in next
+    ret = next(self.iter)
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 517, in __next__
+    data = self._next_data()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 557, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/dataset.py", line 79, in __getitem__
+    return self.transform(self.data[idx])
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 787, in <lambda>
+    dataset=TransformDataset(train, lambda data: converter([load_tr(data)])),
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/io_utils.py", line 146, in __call__
+    x = self._get_from_loader(
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/io_utils.py", line 600, in _get_from_loader
+    return kaldiio.load_mat(filepath)
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/kaldiio/matio.py", line 240, in load_mat
+    with open_like_kaldi(ark, "rb") as fd:
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/kaldiio/utils.py", line 208, in open_like_kaldi
+    return io.open(name, mode, encoding=encoding)
+Will finalize trainer extensions and updater before reraising the exception.
+Traceback (most recent call last):
+  File "../../../espnet/bin/asr_train.py", line 816, in <module>
+    main(sys.argv[1:])
+  File "../../../espnet/bin/asr_train.py", line 802, in main
+    train(args)
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 1152, in train
+    trainer.run()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/chainer/chainer/training/trainer.py", line 349, in run
+    six.reraise(*exc_info)
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/six.py", line 719, in reraise
+    raise value
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/chainer/chainer/training/trainer.py", line 316, in run
+    update()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 342, in update
+    self.update_core()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 249, in update_core
+    batch = train_iter.next()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/dataset.py", line 110, in next
+    ret = next(self.iter)
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 517, in __next__
+    data = self._next_data()
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/dataloader.py", line 557, in _next_data
+    data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in fetch
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/torch/utils/data/_utils/fetch.py", line 44, in <listcomp>
+    data = [self.dataset[idx] for idx in possibly_batched_index]
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/dataset.py", line 79, in __getitem__
+    return self.transform(self.data[idx])
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/asr/pytorch_backend/asr.py", line 787, in <lambda>
+    dataset=TransformDataset(train, lambda data: converter([load_tr(data)])),
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/io_utils.py", line 146, in __call__
+    x = self._get_from_loader(
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/espnet/utils/io_utils.py", line 600, in _get_from_loader
+    return kaldiio.load_mat(filepath)
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/kaldiio/matio.py", line 240, in load_mat
+    with open_like_kaldi(ark, "rb") as fd:
+  File "/home/mifs/gs534/Documents/Project/exp/espnet/tools/anaconda/envs/espnet/lib/python3.8/site-packages/kaldiio/utils.py", line 208, in open_like_kaldi
+    return io.open(name, mode, encoding=encoding)
+FileNotFoundError: [Errno 2] No such file or directory: '/home/gs534/rds/hpc-work/work/Librispeech/dump/train_100/deltafalse/feats.24.ark'

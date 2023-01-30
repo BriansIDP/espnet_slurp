@@ -208,23 +208,7 @@ def get_parser():
         "--est-lm", type=str, default=None, help="Cancellation LM model file to read"
     )
     parser.add_argument(
-        "--ilme", type=float, default=0.0, help="Cancellation LM model file to read"
-    )
-    parser.add_argument(
-        "--dynamic-disc",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use dynamic LM discounting",
-    )
-    parser.add_argument(
         "--estlm-factor", type=float, default=0.0, help="Cancellation LM model file to read"
-    )
-    parser.add_argument(
-        "--est-lm2", type=str, default=None, help="Cancellation LM model file to read"
-    )
-    parser.add_argument(
-        "--estlm-factor2", type=float, default=0.0, help="Cancellation LM model file to read"
     )
     parser.add_argument(
         "--rnnlm-conf", type=str, default=None, help="RNNLM model config file to read"
@@ -304,13 +288,6 @@ def get_parser():
         help="Use external RNNLM",
     )
     parser.add_argument(
-        "--crossutt",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use cross utterance RNNLM",
-    )
-    parser.add_argument(
         "--ranking-norm",
         type=strtobool,
         nargs="?",
@@ -348,47 +325,6 @@ def get_parser():
     )
     parser.add_argument(
         "--classorder", type=str, default=None, help="Entity class order file for selection"
-    )
-    parser.add_argument(
-        "--slotlist",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use SLU slot output",
-    )
-    parser.add_argument(
-        "--oracletext",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use SLU slot output",
-    )
-    parser.add_argument(
-        "--unigram", type=str, default='', help="Unigram file for words in ontology"
-    )
-    parser.add_argument(
-        "--penalty-factor", type=float, default=0.0, help="Unigram penalty factor for words in ontology"
-    )
-    parser.add_argument(
-        "--entity",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use entity-based slot KB",
-    )
-    parser.add_argument(
-        "--usehistory",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use dialogue history for state tracking",
-    )
-    parser.add_argument(
-        "--getlaststate",
-        type=strtobool,
-        nargs="?",
-        default=False,
-        help="Use dialogue history for state tracking",
     )
     return parser
 

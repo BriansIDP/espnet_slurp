@@ -163,8 +163,6 @@ class KBmeetingTrain(object):
         self.epoch = 0
         self.curriculum = curriculum
         self.fullepoch = fullepoch
-
-        # get tree for full rareword list
         self.get_full_KB()
 
     def get_meeting_KB(self, uttwordlist, bsize):
@@ -185,20 +183,18 @@ class KBmeetingTrain(object):
             if word not in uttwordlist:
                 sampled_words.append(word)
         # random sample a KB size
-        if self.minlen > 0 and self.minlen < self.maxlen:
-            maxsample_len = random.randint(self.minlen, self.maxlen)
-        else:
-            maxsample_len = self.maxlen
-        if len(uttwordlist) < maxsample_len:
-            sampled_words = list(uttwordlist) + sampled_words[:maxsample_len-len(uttwordlist)]
-        else:
-            sampled_words = list(uttwordlist)
+        # if self.minlen > 0 and self.minlen < self.maxlen:
+        #     maxsample_len = random.randint(self.minlen, self.maxlen)
+        # else:
+        maxsample_len = self.maxlen
+        sampled_words = list(uttwordlist) + sampled_words[:maxsample_len-len(uttwordlist)]
+        assert len(sampled_words) == maxsample_len
         uttKB = sorted(sampled_words)
         worddict = {word:i+1 for i, word in enumerate(uttKB)}
         lextree = make_lexical_tree(worddict, self.chardict, -1)
-        wordlist = uttKB # self.vocab.get_ids(uttKB, oov_sym='<blank>')
+        wordlist = [] # self.vocab.get_ids(uttKB, oov_sym='<blank>')
         # wordmasks = [0] * self.maxlen
-        KBlist = [uttKB] * bsize# torch.LongTensor([wordlist]*bsize)
+        KBlist = torch.LongTensor([wordlist]*bsize)
         # KBmask = torch.Tensor([wordmasks]*bsize)
         KBlextrees = [lextree]*bsize
         return KBlist, true_list, KBlextrees
@@ -206,78 +202,23 @@ class KBmeetingTrain(object):
     def get_full_KB(self):
         worddict = {word:i+1 for i, word in enumerate(self.rarewords)}
         self.full_lextree = [make_lexical_tree(worddict, self.chardict, -1)]
-        self.full_wordlist = torch.LongTensor([self.vocab.get_ids(self.rarewords, oov_sym='<unk>')])
+        self.full_wordlist = torch.LongTensor([self.vocab.get_ids(self.rarewords, oov_sym='<blank>')])
 
-    def get_tree_from_classes(self, ontology, classorder, entity=False):
-        if not isinstance(ontology, dict):
-            with open(ontology) as fin:
-                self.classdict = json.load(fin)
-            with open(classorder) as fin:
-                self.classorder = [line.strip() for line in fin]
-        else:
-            self.classdict = ontology
-            self.classorder = classorder
+    def get_tree_from_classes(self, classfile, classorder):
+        with open(classfile) as fin:
+            self.classdict = json.load(fin)
+        with open(classorder) as fin:
+            self.classorder = [line.strip() for line in fin]
         self.classtrees = []
-        self.classKB = {}
-        self.named_classtrees = {}
         for cls in self.classorder:
-            if entity:
-                uttKB = sorted([tuple(word.split()) for word in self.classdict[cls]])
-                worddict = {word:i+1 for i, word in enumerate(uttKB)}
-                classtree = make_lexical_tree(worddict, self.chardict, -1)
-            else:
-                bpe_ids = [self.rarewords_word[word] for word in self.classdict[cls]]
-                classtree, uttKB = self.get_tree_from_inds(bpe_ids)
-            self.classKB[cls] = uttKB
-            self.classtrees.append(classtree)
-            self.named_classtrees[cls] = classtree
+            bpe_ids = [self.rarewords_word[word] for word in self.classdict[cls]]
+            self.classtrees.append(self.get_tree_from_inds(bpe_ids))
 
-    def get_classed_trees(self, classes, named=False, node_encs=None):
+    def get_classed_trees(self, classes):
         classed_trees = []
-        new_node_encs = []
         for cls in classes:
-            if named:
-                classed_trees.append(self.named_classtrees[cls])
-                # new_node_encs.append(node_encs[cls])
-            elif not named and self.classtrees[cls.item()][0] != {}:
-                classed_trees.append(self.classtrees[cls.item()])
-        return classed_trees #, new_node_encs
-
-    def get_slot_KB(self, wlists, entity=False):
-        trees = []
-        bpewords = []
-        for wlist in wlists:
-            if entity:
-                uttKB = sorted([tuple(word.split()) for word in wlist])
-                bpewords.append(uttKB)
-                worddict = {word:i+1 for i, word in enumerate(uttKB)}
-                trees.append(make_lexical_tree(worddict, self.chardict, -1))
-            else:
-                bpe_ids = [self.rarewords_word[word] for word in wlist]
-                bpewords.append([self.rarewords[bpeid] for bpeid in bpe_ids])
-                trees.append(self.get_tree_from_inds(bpe_ids)[0])
-        return wlists, bpewords, trees
-
-    def get_slot_sep_KB(self, slotwlists, entity=False):
-        trees = []
-        for wlist in slotwlists:
-            tree = []
-            for slotwlist in wlist:
-                if entity:
-                    uttKB = sorted([tuple(word.split()) for word in slotwlist])
-                    worddict = {word:i+1 for i, word in enumerate(uttKB)}
-                    tree.append(make_lexical_tree(worddict, self.chardict, -1))
-                else:
-                    bpe_ids = [self.rarewords_word[word] for word in slotwlist]
-                    tree.append(self.get_tree_from_inds(bpe_ids)[0])
-            trees.append(tree)
-        return trees
-
-    def get_tree(self, autoKBwords):
-        uttKB = sorted(list(autoKBwords))
-        worddict = {word:i+1 for i, word in enumerate(uttKB)}
-        lextree = make_lexical_tree(worddict, self.chardict, -1)
-        return lextree
+            classed_trees.append(self.classtrees[cls.item()])
+        return classed_trees
 
     def get_tree_from_inds(self, inds, extra=None, true_list=[]):
         autoKBwords = set()
@@ -294,22 +235,7 @@ class KBmeetingTrain(object):
         uttKB = sorted(list(autoKBwords))
         worddict = {word:i+1 for i, word in enumerate(uttKB)}
         lextree = make_lexical_tree(worddict, self.chardict, -1)
-        return lextree, uttKB
-
-    def get_slotbiasing(self, wlists, appeared_words, additionaldrop=0.0):
-        slotbiasing = []
-        maxslotbiaslen = min(20, self.maxlen)
-        for i, words in enumerate(appeared_words):
-            if additionaldrop > 0:
-                dropwlist = [word for word in words if random.random() > additionaldrop]
-            else:
-                dropwlist = words
-            if len(dropwlist) < maxslotbiaslen:
-                newwords = random.sample(wlists[i], min(maxslotbiaslen, len(wlists[i])))
-                newwords = [wrd for wrd in newwords if wrd not in words]
-                words = dropwlist + newwords
-            slotbiasing.append(words)
-        return slotbiasing
+        return lextree
 
 
 class Vocabulary(object):
@@ -321,7 +247,7 @@ class Vocabulary(object):
         with open(dictfile, encoding='utf-8') as fin:
             for i, line in enumerate(fin):
                 if bpe:
-                    word = tuple(line.split())
+                    word = tuple(line.split()[1:])
                     self.sym2idx[word] = i
                     self.idx2sym.append(word)
                 else:

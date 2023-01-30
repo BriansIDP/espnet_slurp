@@ -1,0 +1,76 @@
+# network architecture
+# encoder related
+etype: vggblstmp     # encoder architecture type
+elayers: 4
+eunits: 1024
+eprojs: 2048
+subsample: "1_1_1_1" # skip every n frame from input to nth layers
+# decoder related
+dlayers: 1
+dunits: 1024
+# attention related
+atype: location
+adim: 1024
+awin: 5
+aheads: 4
+aconv-chans: 10
+aconv-filts: 100
+
+# hybrid CTC/attention
+mtlalpha: 0.0
+
+# label smoothing
+lsm-type: unigram
+lsm-weight: 0.1
+
+# minibatch related
+batch-size: 20
+maxlen-in: 800  # if input length  > maxlen_in, batchsize is automatically reduced
+maxlen-out: 150 # if output length > maxlen_out, batchsize is automatically reduced
+# maxioratio: 300
+# minioratio: 6
+
+# optimization related
+sortagrad: 0 # Feed samples from shortest to longest ; -1: enabled for all epochs, 0: disabled, other: enabled for 'other' epochs
+opt: adadelta
+epochs: 100
+patience: 0
+accum-grad: 5
+eps: 5e-9
+weight-noise-std: 0.0
+weight-noise-start: 20000
+# weight-noise-std: 0.025
+# weight-noise-start: 30000
+
+# scheduled sampling option
+sampling-probability: 0.0
+
+# Extra
+dropout-rate: 0.0
+dropout-rate-decoder: 0.1
+weight-decay: 0.0001
+context-residual: true
+# report-interval-iters: 1
+
+# KB related
+meetingpath: /home/gs534/project/espnet/egs/librispeech/asr1/data/KBs/LibriKBRare_unigram600suffix/rareword_f15.txt
+# meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/asr1/data/KBs/LibriKBRare_unigram600suffix/all_rare_words.txt
+meetingKB: true
+lm-odim: 256
+dictfile: /home/gs534/project/espnet/egs/librispeech/asr1/data/KBs/bpe_dict_unigram600suffix.txt
+KBlextree: true
+PtrGen: true
+PtrSche: 0
+init-full-model: /home/gs534/rds/hpc-work/work/Librispeech/exp/init_models/baseline.ep.25
+# init-full-model: exp/librispeech_train_baseline_spec/results/model.acc.best
+acousticonly: true
+attn_dim: 256
+KBmaxlen: 500
+randomKBsample: true
+DBinput: true
+# DBmask: 0.1
+DBdrop: 0.3
+# smoothprob: 0.0
+# dynamicKBs: 9
+curriculum: true
+fullepoch: 6

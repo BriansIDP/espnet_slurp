@@ -1,0 +1,24 @@
+batchsize: 0
+beam-size: 30
+ctc-weight: 0.0
+lm-weight: 0.3
+maxlenratio: 0.0
+minlenratio: 0.0
+penalty: 0.0
+coverage-penalty: 0.01
+eos-max-logit-delta: 1.0
+
+# LM select
+# select: true
+# topk: 2
+# # sel-lm: /home/gs534/rds/hpc-work/work/Librispeech/LM/models/model.Multiwoz_class_cont.pt
+# sel-lm: /home/gs534/rds/hpc-work/work/Librispeech/LM/models/model.Multiwoz_class_cont_rare_classloss0.01.pt
+# classlm: true
+# # classfile: /home/gs534/rds/hpc-work/work/Librispeech/KBs/DBwords_merged_nocam.json
+# classfile: /home/gs534/rds/hpc-work/work/Librispeech/KBs/DBents_london.json
+# classorder: /home/gs534/rds/hpc-work/work/Librispeech/KBs/classorder.txt
+
+# shallow fusion
+rnnlm-layer: 1
+rnnlm-unit: 1024
+embed-unit: 512

@@ -3,7 +3,6 @@
 
 import sys
 import numpy
-import time
 
 def editDistance(r, h):
     '''
@@ -183,15 +182,20 @@ def wer(r, h):
     """
     # build the matrix
     d = editDistance(r, h)
-    import pdb; pdb.set_trace()
+
     # find out the manipulation steps
-    step_list = getStepList(r, h, d)
+    list = getStepList(r, h, d)
+
     # print the result in aligned way
     result = float(d[len(r)][len(h)]) / len(r) * 100
     result = str("%.2f" % result) + "%"
-    alignedPrint(step_list, r, h, result)
+    alignedPrint(list, r, h, result)
 
 if __name__ == '__main__':
-    r = 'IN▁ S CO t L AND▁ WE in▁ some▁'.lower().split()
-    h = 'TE    G RA t ED▁  IN TO▁ OUR▁ in▁ some▁'.lower().split()
-    wer(r, h)   
+    filename1 = sys.argv[1]
+    filename2 = sys.argv[2]
+    with open(filename1, 'r', encoding="utf8") as ref:
+        r = ref.read().split()
+    with open(filename2, 'r', encoding="utf8") as hyp:
+        h = hyp.read().split()
+    wer(r, h)

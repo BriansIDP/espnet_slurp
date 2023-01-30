@@ -270,7 +270,7 @@ class CustomUpdater(StandardUpdater):
                 feat = (x[0][:, :, :, i], x[1], x[2])
                 # Compute the loss at this time step and accumulate it
                 if self.ngpu <= 1:
-                    loss = self.model(*feat).mean() / float(self.accum_grad)
+                    loss = self.model(*feat).mean() / self.accum_grad
                 else:
                     # apex does not support torch.nn.DataParallel
                     loss = (
@@ -355,16 +355,12 @@ class CustomConverter(object):
 
     """
 
-    def __init__(self, subsampling_factor=1, dtype=torch.float32, getmeeting=False, gettext=False, getslu=False,
-                 getprevtext=False):
+    def __init__(self, subsampling_factor=1, dtype=torch.float32, getmeeting=False):
         """Construct a CustomConverter object."""
         self.subsampling_factor = subsampling_factor
         self.ignore_id = -1
         self.dtype = dtype
         self.getmeeting = getmeeting
-        self.gettext = gettext
-        self.getprevtext = getprevtext
-        self.getslu = getslu
 
     def __call__(self, batch, device=torch.device("cpu")):
         """Transform a batch and send it to a device.
@@ -381,10 +377,6 @@ class CustomConverter(object):
         assert len(batch) == 1
         xs, ys = batch[0][:2]
         meetings = None
-        orig_text = None
-        prev_text = None
-        slu_intents = None
-        slu_slots = None
         if not xs:
             logging.info("Empty batch.")
             xs_pad = torch.tensor([]).to(device)
@@ -392,21 +384,8 @@ class CustomConverter(object):
             ys_pad = torch.tensor([]).to(device)
             return xs_pad, ilens, ys_pad, meetings
 
-        itemcount = 2
-        if self.getmeeting and len(batch[0]) > itemcount:
-            meetings = batch[0][itemcount]
-            itemcount += 1
-        if self.gettext and len(batch[0]) > itemcount:
-            orig_text = batch[0][itemcount]
-            itemcount += 1
-            if self.getprevtext and len(batch[0]) > itemcount:
-                prev_text = batch[0][itemcount]
-                itemcount += 1
-        if self.getslu and len(batch[0]) > itemcount:
-            slu_intents = batch[0][itemcount]
-            itemcount += 1
-            slu_slots = batch[0][itemcount]
-            itemcount += 1
+        if self.getmeeting:
+            meetings = batch[0][-1]
 
         # perform subsampling
         if self.subsampling_factor > 1:
@@ -446,7 +425,7 @@ class CustomConverter(object):
             self.ignore_id,
         ).to(device)
 
-        return xs_pad, ilens, ys_pad, meetings, orig_text, slu_intents, slu_slots, prev_text
+        return xs_pad, ilens, ys_pad, meetings
 
 
 class CustomConverterMulEnc(object):
@@ -552,7 +531,7 @@ def train(args):
     logging.info("#output dims: " + str(odim))
 
     # specify attention, CTC, hybrid mode
-    if "transducer" in args.model_module or 'rnnt' in args.model_module:
+    if "transducer" in args.model_module:
         if (
             getattr(args, "etype", False) == "transformer"
             or getattr(args, "dtype", False) == "transformer"
@@ -670,7 +649,7 @@ def train(args):
         if hasattr(args, "enc_block_arch") or hasattr(args, "dec_block_arch"):
             adim = model.most_dom_dim
         else:
-            adim = getattr(args, 'adim')
+            adim = args.adim
 
         optimizer = get_std_opt(
             model_params, adim, args.transformer_warmup_steps, args.transformer_lr
@@ -717,8 +696,7 @@ def train(args):
     # Setup a converter
     if args.num_encs == 1:
         converter = CustomConverter(subsampling_factor=model.subsample[0], dtype=dtype,
-                                    getmeeting=args.meetingKB, gettext=(args.modalitymatch or args.jointrep),
-                                    getslu=args.doslu, getprevtext=args.gethistory)
+                                    getmeeting=args.meetingKB)
     else:
         converter = CustomConverterMulEnc(
             [i[0] for i in model.subsample_list], dtype=dtype
@@ -772,9 +750,6 @@ def train(args):
         maxioratio=args.maxioratio,
         minioratio=args.minioratio,
         getmeeting=args.meetingKB,
-        gettext=(args.modalitymatch or args.jointrep),
-        getprevtext=args.gethistory,
-        getslu=args.doslu,
     )
     load_cv = LoadInputsAndTargets(
         mode="asr",
@@ -782,9 +757,6 @@ def train(args):
         preprocess_conf=args.preprocess_conf,
         preprocess_args={"train": False},  # Switch the mode of preprocessing
         getmeeting=args.meetingKB,
-        gettext=(args.modalitymatch or args.jointrep),
-        getprevtext=args.gethistory,
-        getslu=args.doslu,
     )
     # fix random seeds for data loader
     torch.manual_seed(args.seed)
@@ -834,14 +806,13 @@ def train(args):
     if args.init_full_model is not None and args.init_full_model != '':
         snapshot_dict = torch.load(args.init_full_model, map_location=lambda storage, loc: storage)
         trainer.updater.model.load_state_dict(snapshot_dict, strict=False)
-        if getattr(trainer.updater.model, 'slunet', False) and getattr(trainer.updater.model.slunet, 'gcn_l1', False):
-            if getattr(trainer.updater.model.dec, 'gcn_l1', False):
-                trainer.updater.model.slunet.gcn_l1.weight.data.copy_(trainer.updater.model.dec.gcn_l1.weight.data)
-                trainer.updater.model.slunet.gcn_l1.bias.data.copy_(trainer.updater.model.dec.gcn_l1.bias.data)
-                trainer.updater.model.slunet.gcn_l2.weight.data.copy_(trainer.updater.model.dec.gcn_l2.weight.data)
-                trainer.updater.model.slunet.gcn_l2.bias.data.copy_(trainer.updater.model.dec.gcn_l2.bias.data)
 
     # Resume from a snapshot
+    if args.resumedir:
+        snapshots = [(f, int(f.split('.')[-1])) for f in os.listdir(args.resumedir) if 'iter' in f]
+        if snapshots != []:
+            resume_snapshot = sorted(snapshots, key=lambda x: x[1])[-1][0]
+            args.resume = os.path.join(args.resumedir, resume_snapshot)
     if args.resume:
         logging.info("resumed from %s" % args.resume)
         torch_resume(args.resume, trainer, strict=(not args.meetingKB))
@@ -1167,6 +1138,24 @@ def train(args):
     trainer.run()
     check_early_stop(trainer, args.epochs)
 
+def load_external(rnnlm_path, rnnlm):
+    # load the state_dict for the main LM
+    ext_rnnlm = torch.load(rnnlm_path, map_location=lambda storage, loc: storage)
+    ext_rnnlm_dict = ext_rnnlm.state_dict()
+    # fill in state dicts individually
+    for name, param in rnnlm.state_dict().items():
+        # Default LM has lstm as a model list
+        if 'rnn' in name:
+            _, param_name, layer, param_kind = name.split('.')
+            param_name = '.'.join([param_name, param_kind+'_l{}'.format(layer)])
+        elif 'embed' in name:
+            param_name = '.'.join(['encoder', name.split('.')[-1]])
+        elif 'lo' in name:
+            param_name = '.'.join(['decoder', name.split('.')[-1]])
+        else:
+            param_name = '.'.join(name.split('.')[1:])
+        param = ext_rnnlm_dict[param_name].data
+        rnnlm.state_dict()[name].copy_(param)
 
 def recog(args):
     """Decode with the given args.
@@ -1189,11 +1178,6 @@ def recog(args):
 
     # read rnnlm
     if args.rnnlm:
-        # rnnlm_args = get_model_conf(args.rnnlm, args.rnnlm_conf)
-        # if getattr(rnnlm_args, "model_module", "default") != "default":
-        #     raise ValueError(
-        #         "use '--api v2' option to decode with non-default language model"
-        #     )
         rnnlm = lm_pytorch.ClassifierWithState(
             lm_pytorch.RNNLM(
                 len(train_args.char_list) - (1 if '<blank>' in train_args.char_list else 0),
@@ -1203,23 +1187,7 @@ def recog(args):
             )
         )
         if args.external:
-            # load the state_dict for the main LM
-            ext_rnnlm = torch.load(args.rnnlm, map_location=lambda storage, loc: storage)
-            ext_rnnlm_dict = ext_rnnlm.state_dict()
-            # fill in state dicts individually
-            for name, param in rnnlm.state_dict().items():
-                # Default LM has lstm as a model list
-                if 'rnn' in name:
-                    _, param_name, layer, param_kind = name.split('.')
-                    param_name = '.'.join([param_name, param_kind+'_l{}'.format(layer)])
-                elif 'embed' in name:
-                    param_name = '.'.join(['encoder', name.split('.')[-1]])
-                elif 'lo' in name:
-                    param_name = '.'.join(['decoder', name.split('.')[-1]])
-                else:
-                    param_name = '.'.join(name.split('.')[1:])
-                param = ext_rnnlm_dict[param_name].data
-                rnnlm.state_dict()[name].copy_(param)
+            load_external(args.rnnlm, rnnlm)
         else:
             torch_load(args.rnnlm, rnnlm)
         rnnlm.eval()
@@ -1260,9 +1228,15 @@ def recog(args):
                 )
             )
 
-    # gs534 - LM fusion
+    # gs534 - LM for KB selection
+    sel_lm = None
+    best_hid = None
     best_fusion = None
-    best_est = None
+    if args.select:
+        sel_lm = torch.load(args.sel_lm, map_location=lambda storage, loc: storage)
+        sel_lm.eval()
+        if args.classlm:
+            model.meeting_KB.get_tree_from_classes(args.classfile, args.classorder)
 
     # gpu
     if args.ngpu == 1:
@@ -1271,39 +1245,6 @@ def recog(args):
         model.cuda()
         if rnnlm:
             rnnlm.cuda()
-
-    # gs534 - LM for KB selection
-    sel_lm = None
-    best_hid = None
-    best_fusion = None
-    unigram_penalty = None
-    dial_history = '' if args.usehistory else None
-    biasinghist = []
-    laststate = '' if args.getlaststate else None
-    if args.select:
-        sel_lm = torch.load(args.sel_lm, map_location=lambda storage, loc: storage)
-        sel_lm.eval()
-    if (args.select and args.classlm) or args.slotlist:
-        model.meeting_KB.get_tree_from_classes(args.classfile, args.classorder, entity=args.entity)
-        # pre-compute GNN tree encodings
-        with torch.no_grad():
-            for i in range(len(model.meeting_KB.classtrees)):
-                print("Encoding tree for class {}".format(i))
-                model.eval()
-                if model.meeting_KB.classtrees[i][0] != {}:
-                    model.dec.encode_tree(model.meeting_KB.classtrees[i])
-        if args.unigram != '':
-            unigram_penalty = []
-            with open(args.unigram) as fin:
-                unigram = json.load(fin)
-            for classname in model.meeting_KB.classorder:
-                count = 0
-                words = model.meeting_KB.classdict[classname]
-                for word in words:
-                    count += unigram[word] if word in unigram else 0
-                unigram_penalty.append(max(1, count))
-            unigram_penalty = torch.Tensor(unigram_penalty)
-            unigram_penalty = torch.log(unigram_penalty / unigram_penalty.sum()) * args.penalty_factor
 
     # read json data
     with open(args.recog_json, "rb") as f:
@@ -1348,15 +1289,6 @@ def recog(args):
                 KBmodules['pointer_gate'] = model.pointer_gate
                 KBmodules['smoothprob'] = getattr(model, 'smoothprob', 1.0)
                 KBmodules['KBin'] = getattr(model, 'KBin', False)
-                KBmodules['treetype'] = getattr(model, 'treetype', '')
-                if getattr(model, 'treetype', '').startswith('gcn'):
-                    KBmodules['gcn_l1'] = model.gcn_l1
-                    KBmodules['gcn_l2'] = model.gcn_l2
-                    if hasattr(model, 'gcn_l3'):
-                        KBmodules['gcn_l3'] = model.gcn_l3
-                elif getattr(model, 'treetype', '') == '':
-                    KBmodules['recursive_proj'] = model.recursive_proj
-                KBmodules['tree_hid'] = getattr(model, 'tree_hid', '')
 
         beam_search_transducer = BeamSearchTransducer(
             decoder=trans_decoder,
@@ -1373,7 +1305,8 @@ def recog(args):
             score_norm=args.score_norm,
             KBmodules=KBmodules,
             sel_lm=sel_lm,
-            topk=args.topk
+            topk=args.topk,
+            prefix=getattr(train_args, 'prefix', False)
         )
 
     if args.batchsize == 0:
@@ -1386,23 +1319,6 @@ def recog(args):
                     meeting = set([tuple(word) for word in js[name]['output'][0]['uttKB']])
                 else:
                     meeting = get_meetings([name])
-                # Slot KB prediction
-                slotlist = []
-                if args.slotlist:
-                    slotlist = js[name]['output'][0]['shortlist']
-                # system response
-                if args.usehistory and 'prevutts' in js[name]['output'][0]:
-                    if js[name]['output'][0]['prevutts'] == '':
-                        dial_history = ''
-                        laststate = ''
-                        biasinghist = []
-                    else:
-                        dial_history += js[name]['output'][0]['prevutts']
-                # oracle text
-                oracletext = None
-                if args.oracletext:
-                    oracletext = [int(idx) for idx in js[name]['output'][0]['tokenid'].split()]
-
                 feat = load_inputs_and_targets(batch)
                 feat = (
                     feat[0][0]
@@ -1454,24 +1370,13 @@ def recog(args):
                                 nbest_hyps[n]["yseq"].extend(hyps[n]["yseq"])
                                 nbest_hyps[n]["score"] += hyps[n]["score"]
                 elif hasattr(model, "is_rnnt"):
-                    nbest_hyps = model.recognize(feat, beam_search_transducer, meetings=meeting,
-                        estlm=est_lm, estlm_factor=args.estlm_factor, prev_hid=best_hid)
-                    if args.select:
-                        best_hid = nbest_hyps[0]['prev_hid']
-                    # logging.info('Trace here {}'.format(' '.join([str(t) for t in nbest_hyps[0]['trace']])))
+                    nbest_hyps = model.recognize(feat, beam_search_transducer, meetings=meeting, prev_hid=best_hid)
+                    best_hid = nbest_hyps[0]['prev_hid']
                 else:
-                    if not args.crossutt:
-                        best_fusion, best_est = None, None
-                    history_to_send = dial_history + laststate + '\n' if args.getlaststate and laststate != '' else dial_history
-                    nbest_hyps, best_fusion, best_est, best_hid, laststate = model.recognize(
-                        feat, args, train_args.char_list, rnnlm, meetings=meeting,
-                        best_fusion=best_fusion, estlm=est_lm, estlm_factor=args.estlm_factor,
-                        best_est=best_est, sel_lm=sel_lm, prev_hid=best_hid, slotlist=slotlist,
-                        oracletext=oracletext, unigram=unigram_penalty, history=history_to_send, bhist=biasinghist
+                    nbest_hyps, best_hid = model.recognize(
+                        feat, args, train_args.char_list, rnnlm, meetings=meeting, estlm=est_lm,
+                        estlm_factor=args.estlm_factor, sel_lm=sel_lm, prev_hid=best_hid
                     )
-                    if args.usehistory and dial_history is not None:
-                        dial_history += nbest_hyps[0]['yseq_str'].lower()
-                        # biasinghist = nbest_hyps[0]['entities']
                 new_js[name] = add_results_to_json(
                     js[name], nbest_hyps, train_args.char_list
                 )

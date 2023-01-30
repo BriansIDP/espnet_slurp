@@ -73,8 +73,8 @@ class E2E(E2ELas):
             cnn_module_kernel=args.cnn_module_kernel,
         )
         # gs534 - lextree
-        # if self.init_from is not None:
-        #     self.load_from()
+        if self.init_from is not None:
+            self.load_from()
 
     def forward_frontend_and_encoder(self, xs_pad, ilens):
         """Forward front-end and encoder, different from LAS."""

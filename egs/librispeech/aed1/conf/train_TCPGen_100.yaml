@@ -1,0 +1,97 @@
+# network architecture
+backend: pytorch
+model-module: espnet.nets.pytorch_backend.e2e_asr_cfmlas:E2E
+# encoder related
+elayers: 16
+eunits: 2048
+eprojs: 512 # this must equal to transformer-adim
+transformer-adim: 512
+transformer-aheads: 4
+transformer-attn-dropout-rate: 0.0
+transformer-input-layer: conv2d
+transformer-encoder-activation-type: swish
+transformer-encoder-pos-enc-layer-type: rel_pos
+transformer-encoder-selfattn-layer-type: rel_selfattn
+macaron-style: true
+use-cnn-module: true
+cnn-module-kernel: 31
+# decoder related
+dlayers: 1
+dunits: 1024
+# attention related
+adim: 1024
+atype: location
+aconv-chans: 10
+aconv-filts: 100
+
+# hybrid CTC/attention
+mtlalpha: 0.0
+
+# label smoothing
+lsm-type: unigram
+lsm-weight: 0.1
+dropout-rate: 0.1
+dropout-rate-decoder: 0.1
+weight-decay: 0.0
+# ema-decay: 0.999
+context-residual: true
+
+# minibatch related
+batch-size: 3
+maxlen-in: 512
+maxlen-out: 150
+maxioratio: 300
+minioratio: 6
+
+# optimization related
+sortagrad: 0
+accum-grad: 6
+grad-clip: 5
+opt: noam
+epochs: 88
+patience: 0
+# weight-noise-std: 0.00
+# weight-noise-start: 20000
+transformer-lr: 2.5
+transformer-warmup-steps: 25000
+
+# scheduled sampling option
+sampling-probability: 0.0
+report-interval-iters: 2
+
+# KB related
+meetingpath: data/Biasing/Librispeech_unigram600suffix/rareword_f15.txt
+meetingKB: true
+dictfile: data/Biasing/bpe_dict_unigram600suffix.txt
+lm-odim: 256
+KBlextree: true
+PtrGen: true
+PtrSche: 0
+# PtrKBin: true
+acousticonly: true
+attn_dim: 256
+KBmaxlen: 500
+KBminlen: 500
+randomKBsample: true
+# DBinput: true
+# DBmask: 0.1
+DBdrop: 0.3
+# dynamicKBs: 0
+# smoothprob: 0.0
+# ILMTfactor: 0.1
+# treetype: gcn5
+# treehid: 256
+# treeresidual: true
+# gnntie: true
+# gnnheads: 2
+
+# MBR
+# mbrloss: true
+# mbrbeam: 5
+# mbrnbest: 5
+# mbrlambda: 1.0
+# mweweight: 0.5
+# mbrrareweight: 0.5
+# # use-wp-errors: true
+# cfm-mbr-start: 15
+# mbruseKB: false

@@ -41,7 +41,8 @@ class BeamSearchTransducer:
         KBmodules: dict = {},
         char_list: list = [],
         sel_lm: torch.nn.Module = None,
-        topk: int = 0
+        topk: int = 0,
+        prefix: bool = False
     ):
         """Initialize transducer beam search.
 
@@ -112,8 +113,9 @@ class BeamSearchTransducer:
         self.char_list = getattr(self, 'char_list', char_list)
         self.sel_lm = sel_lm
         self.topk = topk
+        self.prefix = prefix
 
-    def __call__(self, h: torch.Tensor, meetings=None, estlm=None, estlm_factor=0.0, prev_hid=None) -> Union[List[Hypothesis], List[NSCHypothesis]]:
+    def __call__(self, h: torch.Tensor, meetings=None, prev_hid=None) -> Union[List[Hypothesis], List[NSCHypothesis]]:
         """Perform beam search.
 
         Args:
@@ -130,13 +132,11 @@ class BeamSearchTransducer:
             self.decoder.set_data_type(h.dtype)
 
         if self.search_type == "default":
-            nbest_hyps = self.search_algorithm(h, meetings=meetings,
-                estlm=estlm, estlm_factor=estlm_factor, prev_hid=prev_hid)
+            nbest_hyps = self.search_algorithm(h, meetings=meetings, prev_hid=prev_hid)
         else:
             nbest_hyps = self.search_algorithm(h)
-        print('Time elapsed: {:.2f}'.format(time.time()-start))
-        print(nbest_hyps[0].score)
-        nbest_hyps[0].lextree = None
+        # import pdb; pdb.set_trace()
+        print('1-best score:', nbest_hyps[0].score)
         # print(meetings)
 
         return nbest_hyps
@@ -160,7 +160,7 @@ class BeamSearchTransducer:
 
         return hyps[: self.nbest]
 
-    def greedy_search(self, h: torch.Tensor, meetings=None, estlm=None, estlm_factor=0.0) -> List[Hypothesis]:
+    def greedy_search(self, h: torch.Tensor, meetings=None) -> List[Hypothesis]:
         """Greedy search implementation for transformer-transducer.
 
         Args:
@@ -198,19 +198,16 @@ class BeamSearchTransducer:
                     query_acoustic = self.Qproj_acoustic(hi)
                     query = query_char + query_acoustic
                     KBembedding, ptr_dist = self.get_KB_emb(query, lex_mask)
-                    if self.KBin and not self.DBinput:
-                        hs_plm = KBembedding
+                if self.DBinput:
+                    hs_plm = self.DBembed((1-lex_mask[:-1].float()))
 
             z, joint_activation = self.joint_network(hi, y, h_plm=hs_plm)
 
             if self.meeting_KB is not None and self.PtrGen and inKB:
                 p_gen = torch.sigmoid(self.pointer_gate(torch.cat([joint_activation, KBembedding], dim=-1)))
-                p_gen = p_gen * self.smoothprob
                 model_tu = torch.softmax(z, dim=-1)
-                ptr_dist_fact = ptr_dist[1:] * (1.0 - model_tu[0])
                 ptr_gen_complement = ptr_dist[-1:] * p_gen
-                p_partial = ptr_dist_fact[:-1] * p_gen + model_tu[1:] * (1 - p_gen + ptr_gen_complement)
-                ytu = torch.cat([model_tu[0:1], p_partial], dim=-1)
+                ytu = ptr_dist[:-1] * p_gen + model_tu * (1 - p_gen + ptr_gen_complement)
                 ytu = torch.log(ytu)
             else:
                 ytu = torch.log_softmax(z, dim=-1)
@@ -229,13 +226,13 @@ class BeamSearchTransducer:
 
         return [hyp]
 
-    def meeting_lextree_step(self, char_idx, new_tree, meeting):
+    def meeting_lextree_step(self, char_idx, new_tree, reset_lextree):
         step_mask = torch.ones(len(self.char_list) + 1)
         new_tree = new_tree[0]
         char_idx = char_idx if isinstance(char_idx, int) else char_idx.item()
         ptr_gen = True
         if char_idx in [self.eos] or self.char_list[char_idx].endswith('▁'):
-            new_tree = self.meeting_KB.meetinglextree[meeting] if isinstance(meeting, str) else meeting
+            new_tree = reset_lextree
             ptr_gen = True
         elif char_idx not in new_tree:
             new_tree = [{}]
@@ -243,6 +240,36 @@ class BeamSearchTransducer:
         else:
             new_tree = new_tree[char_idx]
         step_mask[list(new_tree[0].keys())] = 0
+        step_mask[-1] = 0
+        # step_mask[0] = 0
+        return new_tree, step_mask.byte(), ptr_gen
+
+    def meeting_lextree_step_prefix(self, char_idx, new_tree, reset_lextree):
+        step_mask = torch.ones(len(self.char_list) + 1)
+        new_tree = new_tree[0]
+        char_idx = char_idx if isinstance(char_idx, int) else char_idx.item()
+        ptr_gen = True
+        if char_idx in [self.eos]:
+            new_tree = reset_lextree
+            step_mask[list(new_tree[0].keys())] = 0
+        elif self.char_list[char_idx].startswith('▁'):
+            new_tree = reset_lextree
+            if char_idx not in new_tree[0]:
+                step_mask[list(new_tree[0].keys())] = 0
+            else:
+                new_tree = new_tree[0][char_idx]
+                step_mask[list(new_tree[0].keys())] = 0
+                if new_tree[1] != -1:
+                    step_mask[list(reset_lextree[0].keys())] = 0
+        else:
+            if char_idx not in new_tree:
+                new_tree = reset_lextree
+                step_mask[list(new_tree[0].keys())] = 0
+            else:
+                new_tree = new_tree[char_idx]
+                step_mask[list(new_tree[0].keys())] = 0
+                if new_tree[1] != -1:
+                    step_mask[list(reset_lextree[0].keys())] = 0 
         step_mask[-1] = 0
         # step_mask[0] = 0
         return new_tree, step_mask.byte(), ptr_gen
@@ -274,141 +301,6 @@ class BeamSearchTransducer:
         KBembedding = torch.einsum('ki,ij->kj', KBweight[:,:-1], meeting_KB[:-1,:])
         # KBembedding = torch.einsum('ki,ij->j', KBweight, meeting_KB)
         return KBembedding, KBweight
-
-    def get_meetingKB_emb_map(self, query, meeting_mask, meeting_embs, back_transform):
-        """
-        query: (nutts, T, attn_dim)
-        meeting_embs: (nutts, n_nodes, embdim)
-        meeting_mask: (nutts, n_nodes)
-        back_transform: (nutts, n_nodes, nbpes)
-
-        return: (nutts, T, nbpes)
-        """
-        meeting_KB = self.Kproj(meeting_embs)
-        KBweight = torch.einsum('ijk,itk->itj', meeting_KB, query)
-        KBweight = KBweight / math.sqrt(query.size(-1))
-        KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
-        KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
-        if meeting_embs.size(1) > 1:
-            KBembedding = torch.einsum('ijk,itj->itk', meeting_KB[:,:-1,:], KBweight[:,:,:-1])
-        else:
-            KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
-        KBweight = torch.einsum('ijk,itj->itk', back_transform, KBweight)
-        return KBembedding, KBweight
-
-    def get_lextree_step_embs_inference(self, char_idx, tree_track, reset_lextree):
-        # meeting_KB = torch.cat([self.embed.weight.data, self.ooKBemb.weight], dim=0)
-        ooKB_id = len(self.char_list)
-        new_tree = tree_track[0]
-        char_idx = char_idx if isinstance(char_idx, int) else char_idx.item()
-        ptr_gen = True
-        if char_idx in [self.eos] or self.char_list[char_idx].endswith('▁'):
-            new_tree = reset_lextree
-        elif char_idx not in new_tree:
-            new_tree = [{}]
-            ptr_gen = False
-        else:
-            new_tree = new_tree[char_idx]
-        if len(new_tree) > 2 and new_tree[0] != {}:
-            step_embs = torch.cat([node[3] for key, node in new_tree[0].items()], dim=0)
-        else:
-            step_embs = torch.empty(0, self.tree_hid)
-        back_transform = []
-        indices = list(new_tree[0].keys()) + [ooKB_id]
-        for i, ind in enumerate(indices):
-            one_hot = [0] * (ooKB_id + 1)
-            one_hot[ind] = 1
-            back_transform.append(one_hot)
-        back_transform = torch.Tensor(back_transform)
-        # step_embs = torch.einsum('jk,km->jm', back_transform, meeting_KB)
-        step_embs = torch.cat([step_embs, self.ooKBemb.weight], dim=0)
-        step_mask = torch.zeros(back_transform.size(0)).byte()
-        return step_mask.unsqueeze(0), new_tree, ptr_gen, step_embs.unsqueeze(0), back_transform.unsqueeze(0)
-
-    def get_lextree_encs(self, lextree, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            ey = self.decoder.embed(torch.LongTensor([wordpiece]))
-            lextree.append(ey)
-            return ey
-        elif lextree[1] == -1 and lextree[0] != {}:
-            wordpieces = []
-            for newpiece, values in lextree[0].items():
-                wordpieces.append(self.get_lextree_encs(values, newpiece))
-            wordpiece_h = torch.cat(wordpieces, dim=0).sum(dim=0).unsqueeze(0)
-            if wordpiece is not None:
-                ey = self.decoder.embed(torch.LongTensor([wordpiece]))
-                wordpiece_h = self.recursive_proj(torch.cat([ey, wordpiece_h], dim=-1))
-                wordpiece_h = torch.relu(wordpiece_h)
-                # wordpiece_h = torch.sigmoid(wordpiece_h)
-                lextree.append(wordpiece_h)
-            return wordpiece_h
-
-    def get_lextree_encs_gcn(self, lextree, embeddings, adjacency, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = len(embeddings)
-            # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-            ey = self.decoder.embed.weight[wordpiece].unsqueeze(0)
-            embeddings.append(ey)
-            adjacency.append([idx])
-            lextree.append([])
-            lextree.append(idx)
-            return idx
-        elif lextree[1] == -1 and lextree[0] != {}:
-            ids = []
-            idx = len(embeddings)
-            if wordpiece is not None:
-                # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-                ey = self.decoder.embed.weight[wordpiece].unsqueeze(0)
-                embeddings.append(ey)
-            for newpiece, values in lextree[0].items():
-                ids.append(self.get_lextree_encs_gcn(values, embeddings, adjacency, newpiece))
-            if wordpiece is not None:
-                adjacency.append([idx] + ids)
-                lextree.append([])
-                lextree.append(idx)
-            return idx
-
-    def forward_gcn(self, lextree, embeddings, adjacency):
-        n_nodes = len(embeddings)
-        embeddings = torch.cat(embeddings, dim=0)
-        adjacency_mat = embeddings.new_zeros(n_nodes, n_nodes)
-        for node in adjacency:
-            for neighbour in node:
-                adjacency_mat[node[0], neighbour] = 1.0
-        degrees = torch.diag(torch.sum(adjacency_mat, dim=-1) ** -0.5)
-        nodes_encs = self.gcn_l1(embeddings)
-        adjacency_mat = torch.einsum('ij,jk->ik', degrees, adjacency_mat)
-        adjacency_mat = torch.einsum('ij,jk->ik', adjacency_mat, degrees)
-        nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        if self.treetype != 'gcn' and int(self.treetype[-1]) > 1:
-            nodes_encs = self.gcn_l2(nodes_encs)
-            nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-            if int(self.treetype[-1]) > 2:
-                nodes_encs = self.gcn_l3(nodes_encs)
-                nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        return nodes_encs
-
-    def fill_lextree_encs_gcn(self, lextree, nodes_encs, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = lextree[4]
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-        elif lextree[1] == -1 and lextree[0] != {}:
-            for newpiece, values in lextree[0].items():
-                self.fill_lextree_encs_gcn(values, nodes_encs, newpiece)
-            if wordpiece is not None:
-                idx = lextree[4]
-                # lextree.append(nodes_encs[idx])
-                lextree[3] = nodes_encs[idx].unsqueeze(0)
-
-    def encode_tree(self, prefixtree):
-        if self.treetype.startswith('gcn'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            nodes_encs = self.forward_gcn(prefixtree, embeddings, adjacency)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
-        else:
-            self.get_lextree_encs(prefixtree)
 
     def get_last_word(self, charlist, split=False):
         starts = len(charlist) - 2
@@ -478,7 +370,7 @@ class BeamSearchTransducer:
             hs_plm = None
             step_mask = torch.ones(batch, beam_v, len(self.char_list) + 1)
             inKB_mat = torch.ones(batch, beam_v)
-            if self.meeting_KB is not None and meetings is not None and self.PtrGen:
+            if self.meeting_KB is not None and meetings is not None:
                 for b_id, j in enumerate(unfinished_inds):
                     hyps = kept_hyps[j]
                     for hyp_id, hyp in enumerate(hyps):
@@ -499,10 +391,10 @@ class BeamSearchTransducer:
             zs, joint_activations = self.joint_network(beam_batch_enc, dec_output.squeeze(1), h_plm=hs_plm)
 
             # TCPGen
-            if self.meeting_KB is not None and meetings is not None and self.PtrGen:
+            if self.meeting_KB is not None and meetings is not None:
                 model_tu = torch.softmax(zs, dim=-1)
                 p_gen = torch.sigmoid(self.pointer_gate(torch.cat([joint_activations, KBembedding], dim=-1)))
-                p_gen = p_gen.masked_fill(inKB_mat.view(-1, 1).to(p_gen.device).bool(), 0) * self.smoothprob
+                p_gen = p_gen.masked_fill(inKB_mat.view(-1, 1).to(p_gen.device), 0) * self.smoothprob
                 ptr_dist_fact = ptr_dist[:,1:] * (1.0 - model_tu[:,0:1])
                 ptr_gen_complement = ptr_dist[:,-1:] * p_gen
                 p_partial = ptr_dist_fact[:,:-1] * p_gen + model_tu[:,1:] * (1 - p_gen + ptr_gen_complement)
@@ -524,7 +416,7 @@ class BeamSearchTransducer:
             accum_odim_ids = torch.fmod(accum_best_ids, bb_ytu.size(-1)-1).view(-1, 1) + 1 # starting from 1
             pad_b = (torch.arange(batch) * beam_v).view(-1, 1).to(accum_best_ids.device)
             # batch * beam
-            accum_beam_ids = torch.div(accum_best_ids, bb_ytu.size(-1)-1, rounding_mode='floor')
+            accum_beam_ids = torch.div(accum_best_ids, bb_ytu.size(-1)-1)
             accum_padded_beam_ids = (accum_beam_ids + pad_b).view(-1)
 
             # gather yseq and forward again
@@ -552,8 +444,12 @@ class BeamSearchTransducer:
                         new_yseq = kept_hyps[batch_id][beam_id].yseq[:] + [new_vy]
                         new_lextree = None
                         if self.meeting_KB is not None:
-                            new_lextree, _, _ = self.meeting_lextree_step(new_vy,
-                                kept_hyps[batch_id][beam_id].lextree, init_lextree) 
+                            if self.prefix:
+                                new_lextree, _, _ = self.meeting_lextree_step_prefix(new_vy,
+                                    kept_hyps[batch_id][beam_id].lextree, init_lextree)
+                            else:
+                                new_lextree, _, _ = self.meeting_lextree_step(new_vy,
+                                    kept_hyps[batch_id][beam_id].lextree, init_lextree) 
                         new_vscore = bb_vscores[batch_id, ind_id:ind_id+1]
                         # search and delete duplicate
                         for ind, hyp in enumerate(unfinished_kept_hyps[unfinished_inds[batch_id]]):
@@ -848,7 +744,7 @@ class BeamSearchTransducer:
             to_return.append((hyp.yseq[1:], hyp.score, werror))
         return to_return
 
-    def default_beam_search(self, h: torch.Tensor, meetings=None, estlm=None, estlm_factor=0.0, prev_hid=None) -> List[Hypothesis]:
+    def default_beam_search(self, h: torch.Tensor, meetings=None, prev_hid=None) -> List[Hypothesis]:
         """Beam search implementation.
 
         Args:
@@ -864,6 +760,8 @@ class BeamSearchTransducer:
         dec_state = self.decoder.init_state(1)
 
         init_lextree = None
+        init_hid = None
+        new_hid = None
         if self.meeting_KB is not None:
             if self.sel_lm is None:
                 meeting_info = self.meeting_KB.get_meeting_KB(meetings, 1)
@@ -874,19 +772,11 @@ class BeamSearchTransducer:
                 init_lextree = self.meeting_KB.meetinglextree[meeting_info[2][0]].copy()
             else:
                 init_lextree = meeting_info[2][0]
-            init_hid = None
-            new_hid = None
             if self.sel_lm is not None:
                 init_hid = self.sel_lm.init_hidden(1) if prev_hid is None else prev_hid
-            else:
-                self.encode_tree(init_lextree)
-
-        estlm_state = None
-        if estlm is not None:
-            estlm_state = estlm.init_hidden(1)
 
         kept_hyps = [Hypothesis(score=0.0, vscore=h.new_zeros(1), yseq=[self.blank], dec_state=dec_state,
-            lextree=init_lextree, p_gen=[], trace=[], estlm_state=estlm_state)]
+            lextree=init_lextree, p_gen=[], trace=[], prev_hid=init_hid)]
         cache = {}
 
         for enc_pos, hi in enumerate(h):
@@ -908,6 +798,7 @@ class BeamSearchTransducer:
                 hs_plm = None
                 if self.meeting_KB is not None:
                     vy = max_hyp.yseq[-1] if len(max_hyp.yseq) > 1 else self.eos
+
                     # select KB entries and organise reset tree
                     if self.sel_lm is not None and (vy == self.eos or self.char_list[vy].endswith('▁')):
                         if vy == self.eos:
@@ -920,16 +811,16 @@ class BeamSearchTransducer:
                         new_lm_output = lmout[meeting_info[0][0]]
                         values, new_select = torch.topk(new_lm_output, self.topk, dim=0)
                         reset_lextree = self.meeting_KB.get_tree_from_inds(new_select, extra=meeting_info[1])
-                        self.encode_tree(reset_lextree)
                     else:
                         meeting = meeting_info[2][0]
-                        reset_lextree = self.meeting_KB.meetinglextree[meeting] if isinstance(meeting, str) else init_lextree
+                        reset_lextree = self.meeting_KB.meetinglextree[meeting] if isinstance(meeting, str) else meeting
                         if self.sel_lm is not None:
                             new_hid = max_hyp.prev_hid
 
-                    # tree_track, lex_mask, inKB = self.meeting_lextree_step(vy, max_hyp.lextree, meeting_info[2][0])
-                    step_mask, tree_track, inKB, step_embs, back_transform = self.get_lextree_step_embs_inference(
-                        vy, max_hyp.lextree, reset_lextree)
+                    if self.prefix:
+                        tree_track, lex_mask, inKB = self.meeting_lextree_step_prefix(vy, max_hyp.lextree, reset_lextree)
+                    else:
+                        tree_track, lex_mask, inKB = self.meeting_lextree_step(vy, max_hyp.lextree, reset_lextree)
                     if self.DBinput:
                         hs_plm = self.DBembed((1-lex_mask[:-1].float()))
 
@@ -937,12 +828,10 @@ class BeamSearchTransducer:
                         query_char = self.decoder.embed(torch.LongTensor([vy])).squeeze(0)
                         query_char = self.Qproj_char(query_char)
                         query_acoustic = self.Qproj_acoustic(hi)
-                        query = (query_char + query_acoustic).unsqueeze(0).unsqueeze(0)
-                        # KBembedding, ptr_dist = self.get_KB_emb(query, lex_mask)
-                        KBembedding, ptr_dist = self.get_meetingKB_emb_map(query, step_mask, step_embs, back_transform)
-                        KBembedding, ptr_dist = KBembedding.squeeze(0).squeeze(0), ptr_dist.squeeze(0).squeeze(0)
+                        query = query_char + query_acoustic
+                        KBembedding, ptr_dist = self.get_KB_emb(query, lex_mask)
                         if self.KBin and not self.DBinput:
-                            hs_plm = KBembedding.squeeze(0).squeeze(0)
+                            hs_plm = KBembedding
 
                 z, joint_activation = self.joint_network(hi, y, h_plm=hs_plm)
                 model_tu = torch.softmax(z, dim=-1)
@@ -970,61 +859,54 @@ class BeamSearchTransducer:
                     # ytu = torch.log_softmax(z, dim=-1)
                 top_k = ytu[1:].topk(beam_k, dim=-1)
 
-                position = -1
-                for ind, hyp in enumerate(kept_hyps):
-                    if hyp.yseq == max_hyp.yseq and hyp.score < (max_hyp.score + float(ytu[0:1])):
-                        position = ind
-                    elif hyp.yseq == max_hyp.yseq:
-                        position = -2
-                if position >= 0:
-                    kept_hyps[ind] = Hypothesis(
-                            score=(max_hyp.score + float(ytu[0:1])),
-                            vscore=max_hyp.vscore + ytu[0:1],
-                            yseq=max_hyp.yseq[:],
-                            dec_state=max_hyp.dec_state,
-                            lm_state=max_hyp.lm_state,
-                            lextree=max_hyp.lextree,
-                            p_gen=max_hyp.p_gen,
-                            trace=max_hyp.trace + [enc_pos],
-                            estlm_state=max_hyp.estlm_state,
-                            prev_hid=max_hyp.prev_hid
-                        )
-                elif position == -1:
-                    kept_hyps.append(
-                        Hypothesis(
-                            score=(max_hyp.score + float(ytu[0:1])),
-                            vscore=max_hyp.vscore + ytu[0:1],
-                            yseq=max_hyp.yseq[:],
-                            dec_state=max_hyp.dec_state,
-                            lm_state=max_hyp.lm_state,
-                            lextree=max_hyp.lextree,
-                            p_gen=max_hyp.p_gen,
-                            trace=max_hyp.trace + [enc_pos],
-                            estlm_state=max_hyp.estlm_state,
-                            prev_hid=max_hyp.prev_hid
-                        )
-                    )
-
-                # kept_hyps.append(
-                #     Hypothesis(
-                #         score=(max_hyp.score + float(ytu[0:1])),
-                #         vscore=0, # max_hyp.vscore + ytu[0:1],
-                #         yseq=max_hyp.yseq[:],
-                #         dec_state=max_hyp.dec_state,
-                #         lm_state=max_hyp.lm_state,
-                #         lextree=max_hyp.lextree,
-                #         p_gen=max_hyp.p_gen
+                # position = -1
+                # for ind, hyp in enumerate(kept_hyps):
+                #     if hyp.yseq == max_hyp.yseq and hyp.score < (max_hyp.score + float(ytu[0:1])):
+                #         position = ind
+                #     elif hyp.yseq == max_hyp.yseq:
+                #         position = -2
+                # if position >= 0:
+                #     kept_hyps[ind] = Hypothesis(
+                #             score=(max_hyp.score + float(ytu[0:1])),
+                #             vscore=max_hyp.vscore + ytu[0:1],
+                #             yseq=max_hyp.yseq[:],
+                #             dec_state=max_hyp.dec_state,
+                #             lm_state=max_hyp.lm_state,
+                #             lextree=max_hyp.lextree,
+                #             p_gen=max_hyp.p_gen,
+                #             trace=max_hyp.trace + [enc_pos]
+                #         )
+                # elif position == -1:
+                #     kept_hyps.append(
+                #         Hypothesis(
+                #             score=(max_hyp.score + float(ytu[0:1])),
+                #             vscore=max_hyp.vscore + ytu[0:1],
+                #             yseq=max_hyp.yseq[:],
+                #             dec_state=max_hyp.dec_state,
+                #             lm_state=max_hyp.lm_state,
+                #             lextree=max_hyp.lextree,
+                #             p_gen=max_hyp.p_gen,
+                #             trace=max_hyp.trace + [enc_pos]
+                #         )
                 #     )
-                # )
+
+                kept_hyps.append(
+                    Hypothesis(
+                        score=(max_hyp.score + float(ytu[0:1])),
+                        vscore=0, # max_hyp.vscore + ytu[0:1],
+                        yseq=max_hyp.yseq[:],
+                        dec_state=max_hyp.dec_state,
+                        lm_state=max_hyp.lm_state,
+                        lextree=max_hyp.lextree,
+                        p_gen=max_hyp.p_gen,
+                        prev_hid=max_hyp.prev_hid
+                    )
+                )
 
                 if self.use_lm:
                     lm_state, lm_scores = self.lm.predict(max_hyp.lm_state, lm_tokens)
                 else:
                     lm_state = max_hyp.lm_state
-
-                if estlm is not None:
-                    estlm_scores, estlm_state = estlm(lm_tokens.unsqueeze(0), max_hyp.estlm_state)
-                    estlm_scores = torch.log_softmax(estlm_scores, dim=-1)
 
                 for logp, k in zip(*top_k):
                     score = max_hyp.score + float(logp)
@@ -1032,12 +914,6 @@ class BeamSearchTransducer:
                     if self.use_lm:
                         # LM removed blank when being loaded
                         score += self.lm_weight * lm_scores[0][k].item()
-                        if estlm is not None:   
-                            score -= estlm_factor * estlm_scores[0][0][k].item()
-
-                    # ugly hack to avoid dead repeat
-                    if int(k+1) == max_hyp.yseq[-1] and int(k+1) == max_hyp.yseq[-2] and int(k+1) == max_hyp.yseq[-3]:
-                        continue
 
                     hyps.append(
                         Hypothesis(
@@ -1048,8 +924,6 @@ class BeamSearchTransducer:
                             lm_state=lm_state,
                             lextree=tree_track,
                             p_gen=max_hyp.p_gen + [store_pgen],
-                            estlm_state=estlm_state,
-                            trace=max_hyp.trace + [enc_pos],
                             prev_hid=new_hid
                         )
                     )
@@ -1062,7 +936,7 @@ class BeamSearchTransducer:
                     key=lambda x: x.score,
                 )
                 # print(enc_pos, hyps_max, kept_hyps_max)
-                if len(kept_most_prob) >= beam or (len(max_yseq) >= len(h) * 1.5 and len(kept_most_prob) > 0):
+                if len(kept_most_prob) >= beam or (len(max_yseq) >= len(h)*1.5 and len(kept_most_prob) > 0):
                     kept_hyps = kept_most_prob
                     break
         return self.sort_nbest(kept_hyps)
