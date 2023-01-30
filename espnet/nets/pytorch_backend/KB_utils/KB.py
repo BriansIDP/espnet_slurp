@@ -155,6 +155,7 @@ class KBmeetingTrain(object):
                 self.rarewords_word[''.join(line.split()).strip('▁').replace('▁', ' ')] = len(self.rarewords)
                 self.rarewords.append(tuple(line.split()))
 
+        self.maxlen = min(maxlen, len(self.rarewords))
         self.unkidx = maxlen - 1
         self.vocab = vocabulary
         self.DBdrop = DBdrop

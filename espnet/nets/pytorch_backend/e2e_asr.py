@@ -154,12 +154,11 @@ class E2E(ASRInterface, torch.nn.Module):
         self.unigram = getattr(args, 'unigram_file', '')
         self.mbr_use_KB = getattr(args, 'mbruseKB', False) if getattr(args, 'mbrloss', False) else True
         if getattr(args, 'meetingKB', False) and getattr(args, 'meetingpath', '') != '':
-            self.KBminlen = getattr(args, 'KBminlen', args.KBmaxlen)
             if self.n_KBs == 0:
                 if args.randomKBsample:
                     self.meeting_KB = KBmeetingTrain(self.vocabulary, args.meetingpath, args.char_list, bpe,
                                                     maxlen=args.KBmaxlen, DBdrop=self.DBdrop, curriculum=self.curriculum,
-                                                    fullepoch=self.fullepoch, unigram=self.unigram, minlen=self.KBminlen)
+                                                    fullepoch=self.fullepoch, unigram=self.unigram)
                 else:
                     self.meeting_KB = KBmeeting(self.vocabulary, args.meetingpath, args.char_list, bpe)
             else:
