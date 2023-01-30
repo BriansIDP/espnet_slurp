@@ -54,8 +54,14 @@ In addition to normal WER scoring, to score rare word error rates (R-WER):
 
 This will give you the rare word error rate.
 
-Expected WER for test-clean:
+Expected WER for test-clean for system trained on train-clean-100:
 
 |                     |          WER |      R-WER |
 |:-------------------:|-------------:|-----------:|
 | test-clean          |       0.0730 |      0.2292|
+
+Expected WER for test-clean for system trained on full training set:
+
+|                     |          WER |      R-WER |
+|:-------------------:|-------------:|-----------:|
+| test-clean          |       0.0330 |      0.0840|
