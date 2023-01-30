@@ -15,23 +15,13 @@ backend=pytorch
 
 # Task specific
 # lmexpdir=/home/gs534/rds/hpc-work/work/AMI/exp/external_rnnlm
-# lmexpdir=exp/external_rnnlm
-# lmexpdir=exp/train_rnnlm_pytorch_char_lm
-# lmexpdir=exp/train_rnnlm_pytorch_default_wordlm
-# lmexpdir=exp/external_rnnlm_crossutt
 tag="debug"
-# expdir=exp/ami_train_transformer_concat
-# expdir=/home/gs534/rds/hpc-work/work/AMI/rnnt_exp/ami_train_baseline_rnnt
 expdir=/data/mifs_scratch/gs534/librispeech/exp/Librispeech100_cfmrnnt_KB500_nodrop_gcn5l_residual_tied_2heads
-# expdir=/home/gs534/rds/hpc-work/work/Librispeech/rnnt_exp_100/Librispeech100_cfmrnnt_KB500_nodrop_treenet_epoch60
 recog_model=model.loss.best
-# decode_config=conf/decode_v2.yaml
 decode_config=conf/decode.yaml
-# decode_config=conf/decode_crossutt.yaml
-# dict=data/lang_1char/ihm_train_units.txt
 bpemode=unigram
 nbpe=600
-suffix='RNNT'
+suffix='suffix'
 dict=/data/mifs_scratch/gs534/librispeech/data_100/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
 
 pids=() # initialize pids

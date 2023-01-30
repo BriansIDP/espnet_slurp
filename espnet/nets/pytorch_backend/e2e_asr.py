@@ -39,7 +39,7 @@ from espnet.nets.pytorch_backend.rnn.argument import (
 from espnet.nets.pytorch_backend.rnn.attentions import att_for
 from espnet.nets.pytorch_backend.rnn.decoders import decoder_for
 from espnet.nets.pytorch_backend.rnn.encoders import encoder_for
-# gs534 - add KB classes
+# gs534 - add biasing classes
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeeting, KBmeetingTrain
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeetingTrainContext, Vocabulary
 from espnet.nets.pytorch_backend.KB_utils.wer import editDistance, getStepList
@@ -144,7 +144,7 @@ class E2E(ASRInterface, torch.nn.Module):
         bpe = ('<space>' not in self.char_list) # hack here for bpe flag
         self.vocabulary = Vocabulary(args.dictfile, bpe) if getattr(args, 'dictfile', '') != '' else None
 
-        # gs534 - create lexicon tree
+        # gs534 - create prefix tree
         lextree = None
         self.meeting_KB = None
         self.n_KBs = getattr(args, 'dynamicKBs', 0)
@@ -303,7 +303,7 @@ class E2E(ASRInterface, torch.nn.Module):
         if self.mtlalpha == 1:
             self.loss_att, acc = None, None
         else:
-            # gs534 - meeting KB
+            # gs534 - TCPGen
             meeting_info = None
             if self.meeting_KB is not None:
                 # self.meeting_KB.DBdrop = self.DBdrop if self.training else 0
@@ -476,7 +476,7 @@ class E2E(ASRInterface, torch.nn.Module):
         else:
             lpz = None
 
-        # Get KB info
+        # Get biasing info
         meeting_info = None
         if self.meeting_KB is not None and not recog_args.select:
             meeting_info = self.meeting_KB.get_meeting_KB(meetings, 1)

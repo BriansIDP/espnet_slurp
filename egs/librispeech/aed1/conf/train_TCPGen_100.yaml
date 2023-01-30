@@ -78,20 +78,3 @@ randomKBsample: true
 DBdrop: 0.3
 # dynamicKBs: 0
 # smoothprob: 0.0
-# ILMTfactor: 0.1
-# treetype: gcn5
-# treehid: 256
-# treeresidual: true
-# gnntie: true
-# gnnheads: 2
-
-# MBR
-# mbrloss: true
-# mbrbeam: 5
-# mbrnbest: 5
-# mbrlambda: 1.0
-# mweweight: 0.5
-# mbrrareweight: 0.5
-# # use-wp-errors: true
-# cfm-mbr-start: 15
-# mbruseKB: false

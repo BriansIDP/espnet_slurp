@@ -120,7 +120,7 @@ class KBmeetingTrainContext(object):
 
 class KBmeetingTrain(object):
     def __init__(self, vocabulary, meetingpath, charlist, bpe=False, maxlen=800, DBdrop=0.0,
-                 curriculum=False, fullepoch=0, unigram='', minlen=0):
+                 curriculum=False, fullepoch=0, unigram=''):
         """Meeting-wise KB in decoder
         """
         self.meetingdict = {}
@@ -155,8 +155,6 @@ class KBmeetingTrain(object):
                 self.rarewords_word[''.join(line.split()).strip('▁').replace('▁', ' ')] = len(self.rarewords)
                 self.rarewords.append(tuple(line.split()))
 
-        self.maxlen = min(maxlen, len(self.rarewords))
-        self.minlen = minlen
         self.unkidx = maxlen - 1
         self.vocab = vocabulary
         self.DBdrop = DBdrop
@@ -182,10 +180,6 @@ class KBmeetingTrain(object):
         for word in pre_sampled_words:
             if word not in uttwordlist:
                 sampled_words.append(word)
-        # random sample a KB size
-        # if self.minlen > 0 and self.minlen < self.maxlen:
-        #     maxsample_len = random.randint(self.minlen, self.maxlen)
-        # else:
         maxsample_len = self.maxlen
         sampled_words = list(uttwordlist) + sampled_words[:maxsample_len-len(uttwordlist)]
         assert len(sampled_words) == maxsample_len

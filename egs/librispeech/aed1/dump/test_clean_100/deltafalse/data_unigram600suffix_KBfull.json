@@ -1,0 +1,115 @@
+{
+    "utts": {
+        "1089-134686-0000": {
+            "input": [
+                {
+                    "feat": "/home/dawna/gs534/espnet/egs/librispeech/debug/dump/test_clean/deltafalse/feats.1.ark:17",
+                    "name": "input1",
+                    "shape": [
+                        1042,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        67,
+                        601
+                    ],
+                    "text": "HE HOPED THERE WOULD BE STEW FOR DINNER TURNIPS AND CARROTS AND BRUISED POTATOES AND FAT MUTTON PIECES TO BE LADLED OUT IN THICK PEPPERED FLOUR FATTENED SAUCE",
+                    "token": "HE▁ HO P ED▁ THERE▁ WOULD▁ BE▁ STE W▁ FOR▁ D IN N ER▁ TUR NI P S▁ AND▁ CAR RO TS▁ AND▁ B R U IS ED▁ PO TA TO ES▁ AND▁ F AT▁ MU T T ON▁ PI E C ES▁ TO▁ BE▁ LA D LED▁ OUT▁ IN▁ TH I C K▁ PE P PER ED▁ FL OUR▁ F AT TEN ED▁ S AU CE▁",
+                    "tokenid": "210 216 386 130 495 585 67 467 586 170 104 234 339 144 522 349 386 475 28 84 426 520 28 54 416 528 246 130 400 477 512 147 28 156 49 333 476 476 370 397 124 78 147 516 67 274 104 280 380 241 487 223 78 272 390 386 393 130 167 377 156 44 483 130 432 50 88",
+                    "uttKB": [
+                        [
+                            "STE",
+                            "W▁"
+                        ],
+                        [
+                            "TUR",
+                            "NI",
+                            "P",
+                            "S▁"
+                        ],
+                        [
+                            "CAR",
+                            "RO",
+                            "TS▁"
+                        ],
+                        [
+                            "B",
+                            "R",
+                            "U",
+                            "IS",
+                            "ED▁"
+                        ],
+                        [
+                            "MU",
+                            "T",
+                            "T",
+                            "ON▁"
+                        ],
+                        [
+                            "LA",
+                            "D",
+                            "LED▁"
+                        ],
+                        [
+                            "PE",
+                            "P",
+                            "PER",
+                            "ED▁"
+                        ],
+                        [
+                            "F",
+                            "AT",
+                            "TEN",
+                            "ED▁"
+                        ]
+                    ]
+                }
+            ],
+            "utt2spk": "1089-134686"
+        },
+        "1089-134686-0001": {
+            "input": [
+                {
+                    "feat": "/home/dawna/gs534/espnet/egs/librispeech/debug/dump/test_clean/deltafalse/feats.1.ark:87205",
+                    "name": "input1",
+                    "shape": [
+                        326,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        17,
+                        601
+                    ],
+                    "text": "STUFF IT INTO YOU HIS BELLY COUNSELLED HIM",
+                    "token": "ST U F F▁ IT▁ INTO▁ YOU▁ HIS▁ BE L LY▁ CO UN SE LL ED▁ HIM▁",
+                    "tokenid": "465 528 156 177 253 240 595 215 57 273 300 95 531 439 291 130 214",
+                    "uttKB": [
+                        [
+                            "BE",
+                            "L",
+                            "LY▁"
+                        ],
+                        [
+                            "CO",
+                            "UN",
+                            "SE",
+                            "LL",
+                            "ED▁"
+                        ]
+                    ]
+                }
+            ],
+            "utt2spk": "1089-134686"
+        }
+    }
+}
