@@ -1,0 +1,63 @@
+{
+    "utts": {
+        "103-1240-0000": {
+            "input": [
+                {
+                    "feat": "/data/mifs_scratch/gs534/librispeech/dump/train_100/deltafalse/feats.1.ark:14",
+                    "name": "input1",
+                    "shape": [
+                        1407,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        81,
+                        601
+                    ],
+                    "text": "CHAPTER ONE MISSUS RACHEL LYNDE IS SURPRISED MISSUS RACHEL LYNDE LIVED JUST WHERE THE AVONLEA MAIN ROAD DIPPED DOWN INTO A LITTLE HOLLOW FRINGED WITH ALDERS AND LADIES EARDROPS AND TRAVERSED BY A BROOK",
+                    "token": "C HA P TER▁ ONE▁ MISSUS▁ RA CH EL▁ L Y N DE▁ IS▁ S UR PRI S ED▁ MISSUS▁ RA CH EL▁ L Y N DE▁ LI V ED▁ JUST▁ WHERE▁ THE▁ AV ON LE A▁ MA IN▁ ROAD▁ DI P P ED▁ DOWN▁ INTO▁ A▁ LITTLE▁ HO L LOW▁ F R IN G ED▁ WITH▁ AL D ERS▁ AND▁ LA DI ES▁ E AR D RO P S▁ AND▁ TRA VER S ED▁ BY▁ A▁ B RO O K▁",
+                    "tokenid": "78 195 386 485 368 323 417 89 133 273 588 339 113 248 432 537 407 432 130 323 417 89 133 273 588 339 113 285 542 130 261 565 498 51 366 278 53 302 241 427 114 386 386 130 120 240 53 290 216 273 299 156 416 234 178 130 578 16 104 143 28 274 114 147 124 37 104 426 386 475 28 517 546 432 130 77 53 54 426 358 272",
+                    "uttKB": [
+                        [
+                            "DI",
+                            "P",
+                            "P",
+                            "ED▁"
+                        ],
+                        [
+                            "F",
+                            "R",
+                            "IN",
+                            "G",
+                            "ED▁"
+                        ],
+                        [
+                            "AL",
+                            "D",
+                            "ERS▁"
+                        ],
+                        [
+                            "E",
+                            "AR",
+                            "D",
+                            "RO",
+                            "P",
+                            "S▁"
+                        ],
+                        [
+                            "TRA",
+                            "VER",
+                            "S",
+                            "ED▁"
+                        ]
+                    ]
+                }
+            ],
+            "utt2spk": "103-1240"
+        }
+    }
+}
