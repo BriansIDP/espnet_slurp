@@ -9,14 +9,15 @@ train_config=conf/train_slu_tcpgen_gcn.yaml
 backend=pytorch
 expname=slurp_conformer_KA2G
 preprocess_config=conf/specaug_tm.yaml
-expdir=/home/gs534/rds/rds-t2-cs164-KQ4S3rlDzm8/gs534/slurp/exp/${expname}
+expdir=exp/${expname}
 debugmode=1
 bpemode=unigram
 nbpe=600
 suffix='suffix'
 KB='_KBf30onto'
 context='_slufull'
-dict=/home/gs534/rds/hpc-work/work/slurp/data/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
+# The word piece dictionary from LibriSpeech 960, or you can change to your own dictionary with your own model
+dict=data/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
 # dict=data/lang_1char/ihm_train_units.txt
 mkdir -p ${expdir}
 
