@@ -1,23 +1,21 @@
 ### Note: export paths if needed
-# export PYTHONPATH="/home/gs534/rds/hpc-work/work/espnet-mm:$PYTHONPATH"
-# export PATH="/home/gs534/rds/hpc-work/work/espnet-mm/tools/venv/bin:$PATH"
-# export PYTHONPATH="/home/gs534/rds/hpc-work/work/espnet-mm/espnet/nets/pytorch_backend/lm:$PYTHONPATH"
 . ./path.sh || exit 1;
 
 ### Need to modify expdir and dict to the correct path, and also modify train-json and valid-json
-train_config=conf/train_slu_tcpgen_gcn.yaml
+train_config=conf/train_slu.yaml
 backend=pytorch
-expname=slurp_conformer_KA2G
+expname=slurp_conformer_slu
 preprocess_config=conf/specaug_tm.yaml
-expdir=/home/gs534/rds/rds-t2-cs164-KQ4S3rlDzm8/gs534/slurp/exp/${expname}
+expdir=./exp/${expname}
 debugmode=1
 bpemode=unigram
 nbpe=600
 suffix='suffix'
 KB='_KBf30onto'
 context='_slufull'
-dict=/home/gs534/rds/hpc-work/work/slurp/data/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
-# dict=data/lang_1char/ihm_train_units.txt
+# NEED to change the wordpiece dictionary to the one you use for LibriSpeech
+# dict=./data/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
+dict=/data/mifs_scratch/gs534/librispeech/data_100/lang_char/train_960_${bpemode}${nbpe}${suffix}_units.txt
 mkdir -p ${expdir}
 
 python ../../../espnet/bin/asr_train.py \

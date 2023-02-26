@@ -41,7 +41,7 @@ class TransLoss(torch.nn.Module):
         self.blank_id = blank_id
         self.useKB = useKB
 
-    def forward(self, pred_pad, target, pred_len, target_len, ptr_dist=None, p_gen=None):
+    def forward(self, pred_pad, target, pred_len, target_len, ptr_dist=None, p_gen=None, reduction='mean'):
         """Compute path-aware regularization transducer loss.
 
         Args:
@@ -65,6 +65,11 @@ class TransLoss(torch.nn.Module):
                 model_dist = torch.softmax(pred_pad, dim=-1)
                 # only use pointer when null probability is below a certain value
                 # p_gen.masked_fill_(model_dist[:,:,:,0:1] >= 0.8, 0)
+                # ptr_gen_complement = (ptr_dist[:,:,:,-1:]) * p_gen
+                # p_final = ptr_dist[:,:,:,:-1] * p_gen + model_dist * (1 - p_gen + ptr_gen_complement)
+                # log_probs = torch.log(p_final)
+
+                # p_gen.masked_fill_(model_dist[:,:,:,0:1] >= 0.8, 0)
                 p_not_null = 1.0 - model_dist[:,:,:,0:1]
                 ptr_dist_fact = ptr_dist[:,:,:,1:] * p_not_null
                 ptr_gen_complement = (ptr_dist[:,:,:,-1:]) * p_gen
@@ -79,7 +84,7 @@ class TransLoss(torch.nn.Module):
                 target,
                 pred_len,
                 target_len,
-                reduction="mean",
+                reduction=reduction,
                 blank=self.blank_id,
                 gather=True,
             )

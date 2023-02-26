@@ -60,6 +60,8 @@ class LoadInputsAndTargets(object):
         maxioratio=float('inf'),
         minioratio=0.0,
         getmeeting=False,
+        gettext=False,
+        getslu=False,
     ):
         self._loaders = {}
         if mode not in ["asr", "tts", "mt", "vc"]:
@@ -105,6 +107,8 @@ class LoadInputsAndTargets(object):
         self.min_ratio = minioratio
         # gs534 - for KB
         self.getmeeting = getmeeting
+        self.gettext = gettext
+        self.getslu = getslu
 
     def __call__(self, batch, return_uttid=False):
         """Function to load inputs and targets from list of dicts
@@ -124,6 +128,9 @@ class LoadInputsAndTargets(object):
         y_feats_dict = OrderedDict()  # OrderedDict[str, List[np.ndarray]]
         uttid_list = []  # List[str]
         utt_KBs = []
+        utt_text = []
+        utt_intents = []
+        utt_slots = []
         uttKB_flag = 0
 
         for uttid, info in batch:
@@ -183,10 +190,15 @@ class LoadInputsAndTargets(object):
                             word = tuple(word)
                             if word not in utt_KBs:
                                 utt_KBs.append(word)
+                    if self.gettext:
+                        utt_text.append(inp['text'].lower())
+                    if self.getslu:
+                        utt_intents.append(inp['intent'])
+                        utt_slots.append(inp['entities'])
 
         if self.mode == "asr":
-            return_batch, uttid_list = self._create_batch_asr(
-                x_feats_dict, y_feats_dict, uttid_list
+            return_batch, uttid_list, utt_text, utt_intents, utt_slots = self._create_batch_asr(
+                x_feats_dict, y_feats_dict, uttid_list, utt_text, utt_intents, utt_slots
             )
         elif self.mode == "tts":
             _, info = batch[0]
@@ -216,13 +228,21 @@ class LoadInputsAndTargets(object):
         if self.getmeeting:
             return_batch['meetings'] = utt_KBs if uttKB_flag == 1 else get_meetings(uttid_list)
 
+        if self.gettext:
+            return_batch['text'] = utt_text
+
+        if self.getslu:
+            return_batch['intents'] = utt_intents
+            return_batch['slots'] = utt_slots
+
         if return_uttid:
             return tuple(return_batch.values()), uttid_list
 
         # Doesn't return the names now.
         return tuple(return_batch.values())
 
-    def _create_batch_asr(self, x_feats_dict, y_feats_dict, uttid_list):
+    def _create_batch_asr(self, x_feats_dict, y_feats_dict, uttid_list, utt_text=[],
+                          utt_intents=[], utt_slots=[]):
         """Create a OrderedDict for the mini-batch
 
         :param OrderedDict x_feats_dict:
@@ -271,6 +291,12 @@ class LoadInputsAndTargets(object):
         # remove zero-length samples
         xs = [[x[i] for i in nonzero_sorted_idx] for x in xs]
         uttid_list = [uttid_list[i] for i in nonzero_sorted_idx]
+        if utt_text != []:
+            utt_text = [utt_text[i] for i in nonzero_sorted_idx]
+        if utt_intents != []:
+            utt_intents = [utt_intents[i] for i in nonzero_sorted_idx]
+        if utt_slots != []:
+            utt_slots = [utt_slots[i] for i in nonzero_sorted_idx]
 
         x_names = list(x_feats_dict.keys())
         if self.load_output:
@@ -286,7 +312,7 @@ class LoadInputsAndTargets(object):
             )
         else:
             return_batch = OrderedDict([(x_name, x) for x_name, x in zip(x_names, xs)])
-        return return_batch, uttid_list
+        return return_batch, uttid_list, utt_text, utt_intents, utt_slots
 
     def _create_batch_mt(self, x_feats_dict, y_feats_dict, uttid_list):
         """Create a OrderedDict for the mini-batch

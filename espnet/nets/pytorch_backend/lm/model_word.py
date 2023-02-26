@@ -7,7 +7,7 @@ from torch.autograd import Variable
 class RNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, rnndrop=0.5, dropout=0.5, tie_weights=False, reset=0):
+    def __init__(self, rnn_type, ntoken, ninp, nhid, nlayers, nclasses=1, rnndrop=0.5, dropout=0.5, tie_weights=False, reset=0):
         super(RNNModel, self).__init__()
         self.drop = nn.Dropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp)
@@ -26,7 +26,7 @@ class RNNModel(nn.Module):
                 raise ValueError('When using the tied flag, nhid must be equal to emsize')
             self.decoder.weight = self.encoder.weight
         # self.TPbottleneck = nn.Linear(nhid, 128)
-        self.TPHead = nn.Linear(nhid, ntoken)
+        self.TPHead = nn.Linear(nhid, nclasses)
         self.ff1 = nn.Linear(ninp, ninp)
         self.ff2 = nn.Linear(ninp, ninp)
 
@@ -36,6 +36,7 @@ class RNNModel(nn.Module):
         self.nhid = nhid
         self.ninp = ninp
         self.nlayers = nlayers
+        self.nclasses = nclasses
         self.reset = reset
         self.mode = 'train'
         self.grads = {}
@@ -71,7 +72,7 @@ class RNNModel(nn.Module):
         output = cat(output_list, 0)
         output = self.drop(output)
         decoded = self.decoder(output) / temperature
-        TPdecoded = torch.sigmoid(self.TPHead(output))
+        TPdecoded = self.TPHead(output)
         return decoded, hidden, TPdecoded
 
     def fusion(self, input, hidden):
@@ -226,103 +227,6 @@ class RNNKBModel(nn.Module):
                     weight.new_zeros(self.nlayers, bsz, self.nhid))
         else:
             return weight.new_zeros(self.nlayers, bsz, self.nhid)
-
-    def resetsent(self, hidden, input, eosidx):
-        outputcell = hidden[0]
-        memorycell = hidden[1]
-        mask = input != eosidx
-        expandedmask = mask.unsqueeze(-1).expand_as(outputcell)
-        expandedmask = expandedmask.float()
-        return (outputcell*expandedmask, memorycell*expandedmask)
-
-
-class RNNClsModel(nn.Module):
-    """Container module with an encoder, a recurrent module, and a decoder."""
-
-    def __init__(self, ntoken, ninp, nhid, nlayers, nclass, rnndrop=0.5, dropout=0.5,
-                 tie_weights=False, reset=0):
-        super(RNNClsModel, self).__init__()
-        self.drop = nn.Dropout(dropout)
-        self.encoder = nn.Embedding(ntoken, ninp)
-        self.rnn = nn.LSTM(ninp, nhid, nlayers, dropout=rnndrop)
-        self.LMhead = nn.Linear(nhid, ntoken)
-        # self.class_interm = nn.Linear(nhid, nhid//4)
-        self.Clshead = nn.Linear(nhid, nclass)
-        if tie_weights:
-            if nhid != ninp and rnn_type != "LSTMP":
-                raise ValueError('When using the tied flag, nhid must be equal to emsize')
-            self.LMhead.weight = self.encoder.weight
-
-        self.init_weights()
-
-        self.nhid = nhid
-        self.ninp = ninp
-        self.nlayers = nlayers
-        self.reset = reset
-        self.mode = 'train'
-        self.grads = {}
-
-    def set_mode(self, m):
-        self.mode = m
-
-    def init_weights(self):
-        initrange = 0.1
-        self.encoder.weight.data.uniform_(-initrange, initrange)
-        self.LMhead.weight.data.uniform_(-initrange, initrange)
-        self.LMhead.bias.data.zero_()
-        self.Clshead.weight.data.uniform_(-initrange, initrange)
-        self.Clshead.bias.data.zero_()
-        # self.class_interm.weight.data.uniform_(-initrange, initrange)
-        # self.class_interm.bias.data.zero_()
-
-    def forward(self, input, hidden, temperature=1, seedwords=None):
-        emb = self.drop(self.encoder(input))
-        output, hidden = self.rnn(emb, hidden)
-        decoded = self.LMhead(self.drop(output)) / temperature
-        # TPdecoded = self.TPbottleneck(self.drop(output))
-        # class_output = torch.relu(self.class_interm(output))
-        classes = self.Clshead(self.drop(output))
-        return decoded, hidden, classes
-
-    def forward_reset(self, input, hidden, temperature=1, eosidx=1):
-        emb = self.drop(self.encoder(input))
-        output_list = []
-        for i in range(emb.size(0)):
-            resethidden = self.resetsent(hidden, input[i,:], eosidx)
-            each_output, hidden = self.rnn(emb[i,:,:].view(1,emb.size(1),-1), resethidden)
-            output_list.append(each_output)
-        output = cat(output_list, 0)
-        output = self.drop(output)
-        decoded = self.decoder(output) / temperature
-        TPdecoded = torch.sigmoid(self.TPHead(output))
-        return decoded, hidden, TPdecoded
-
-    def fusion(self, input, hidden):
-        emb = self.drop(self.encoder(input))
-        output, hidden = self.rnn(emb, hidden)
-        output = self.drop(output)
-        return output, hidden
-
-    def forward_firstorder(self, targets, inputs, rmask):
-        candidates = []
-        rare_targets = []
-        for i, mask in enumerate(rmask):
-            if mask.item() == 1:
-                candidates.append(inputs[i:i+1])
-                rare_targets.append(targets[i:i+1])
-        candidates = torch.cat(candidates, dim=0)
-        targets = torch.cat(rare_targets)
-        mapped_embs = self.encoder(candidates)
-        # mapped_embs = torch.relu(self.ff1(mapped_embs))
-        # mapped_embs = self.ff2(mapped_embs)
-        targets = self.encoder(targets)
-        mse = ((mapped_embs - targets.unsqueeze(1))**2).mean()
-        return mse
-
-    def init_hidden(self, bsz):
-        weight = next(self.parameters())
-        return (weight.new_zeros(self.nlayers, bsz, self.nhid),
-                weight.new_zeros(self.nlayers, bsz, self.nhid))
 
     def resetsent(self, hidden, input, eosidx):
         outputcell = hidden[0]

@@ -663,8 +663,6 @@ def _torch_snapshot_object(trainer, target, filename, savefun):
         "model": model_state_dict,
         "optimizer": trainer.updater.get_optimizer("main").state_dict(),
     }
-    if 'iter' in filename:
-        snapshot_dict["loader_state"] = trainer.updater.get_iterator("main").sampler.get_state()
 
     # save snapshot dictionary
     fn = filename.format(trainer)
@@ -840,10 +838,6 @@ def torch_resume(snapshot_path, trainer, strict=True):
 
     # retore optimizer states
     trainer.updater.get_optimizer("main").load_state_dict(snapshot_dict["optimizer"])
-    if 'loader_state' in snapshot_dict:
-        train_iterator = trainer.updater.get_iterator("main")
-        if hasattr(train_iterator, 'sampler'):
-            trainer.updater.get_iterator("main").sampler.set_state(snapshot_dict['loader_state'])
 
     # delete opened snapshot
     del snapshot_dict
@@ -912,6 +906,11 @@ def add_results_to_json(js, nbest_hyps, char_list):
         out_dic["rec_token"] = rec_token
         out_dic["rec_tokenid"] = rec_tokenid
         out_dic["score"] = score
+        # for SLU
+        if 'slots' in hyp:
+            out_dic['slots'] = hyp['slots']
+            out_dic['intent_pred'] = hyp['intent_pred']
+            out_dic['shortlist'] = hyp['shortlist']
         # out_dic["final_score"] = final_score
 
         # add to list of N-best result dicts

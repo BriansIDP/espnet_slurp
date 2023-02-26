@@ -10,6 +10,7 @@ import math
 import os
 import random
 import time
+from copy import deepcopy
 
 import chainer
 from chainer import reporter
@@ -39,12 +40,15 @@ from espnet.nets.pytorch_backend.rnn.argument import (
 from espnet.nets.pytorch_backend.rnn.attentions import att_for
 from espnet.nets.pytorch_backend.rnn.decoders import decoder_for
 from espnet.nets.pytorch_backend.rnn.encoders import encoder_for
-# gs534 - add biasing classes
+# gs534 - add KB classes
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeeting, KBmeetingTrain
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeetingTrainContext, Vocabulary
+from espnet.nets.pytorch_backend.KB_utils.SLU import SLUutils, SLUNet
 from espnet.nets.pytorch_backend.KB_utils.wer import editDistance, getStepList
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.utils.fill_missing_args import fill_missing_args
+# Modality matching
+from espnet.nets.pytorch_backend.modality.roberta import Roberta_encoder
 
 CTC_LOSS_THRESHOLD = 10000
 
@@ -52,16 +56,21 @@ CTC_LOSS_THRESHOLD = 10000
 class Reporter(chainer.Chain):
     """A chainer reporter wrapper."""
 
-    def report(self, loss_ctc, loss_att, acc, cer_ctc, cer, wer, mtl_loss, mbrloss):
+    def report(self, loss_ctc, loss_att, acc, cer_ctc, cer, wer, mtl_loss, mbrloss,
+               mmloss, sluloss, slotacc, intentacc):
         """Report at every step."""
         reporter.report({"loss_ctc": loss_ctc}, self)
         reporter.report({"loss_att": loss_att}, self)
         reporter.report({"loss_MBR": mbrloss}, self)
+        reporter.report({"loss_Modality": mmloss}, self)
+        reporter.report({"loss_slu": sluloss}, self)
+        reporter.report({"slotacc": slotacc}, self)
+        reporter.report({"intentacc": intentacc}, self)
         reporter.report({"acc": acc}, self)
-        reporter.report({"cer_ctc": cer_ctc}, self)
-        reporter.report({"cer": cer}, self)
-        reporter.report({"wer": wer}, self)
-        logging.info("mtl loss:" + str(mtl_loss))
+        # reporter.report({"cer_ctc": cer_ctc}, self)
+        # reporter.report({"cer": cer}, self)
+        # reporter.report({"wer": wer}, self)
+        # logging.info("mtl loss:" + str(mtl_loss))
         reporter.report({"loss": mtl_loss}, self)
 
 
@@ -144,7 +153,7 @@ class E2E(ASRInterface, torch.nn.Module):
         bpe = ('<space>' not in self.char_list) # hack here for bpe flag
         self.vocabulary = Vocabulary(args.dictfile, bpe) if getattr(args, 'dictfile', '') != '' else None
 
-        # gs534 - create prefix tree
+        # gs534 - create lexicon tree
         lextree = None
         self.meeting_KB = None
         self.n_KBs = getattr(args, 'dynamicKBs', 0)
@@ -152,18 +161,39 @@ class E2E(ASRInterface, torch.nn.Module):
         self.curriculum = getattr(args, 'curriculum', False)
         self.fullepoch = getattr(args, 'fullepoch', 0)
         self.unigram = getattr(args, 'unigram_file', '')
-        self.mbr_use_KB = getattr(args, 'mbruseKB', False) if getattr(args, 'mbrloss', False) else True
+        self.KBminlen = getattr(args, 'KBminlen', args.KBmaxlen)
+        self.mmfactor = getattr(args, 'mmfactor', 0.0)
+        self.domm = getattr(args, 'modalitymatch', False)
         if getattr(args, 'meetingKB', False) and getattr(args, 'meetingpath', '') != '':
             if self.n_KBs == 0:
                 if args.randomKBsample:
                     self.meeting_KB = KBmeetingTrain(self.vocabulary, args.meetingpath, args.char_list, bpe,
                                                     maxlen=args.KBmaxlen, DBdrop=self.DBdrop, curriculum=self.curriculum,
-                                                    fullepoch=self.fullepoch, unigram=self.unigram)
+                                                    fullepoch=self.fullepoch, unigram=self.unigram, minlen=self.KBminlen)
                 else:
                     self.meeting_KB = KBmeeting(self.vocabulary, args.meetingpath, args.char_list, bpe)
             else:
                 self.meeting_KB = KBmeetingTrainContext(self.vocabulary, args.meetingpath, args.char_list, bpe,
                                                         maxlen=args.KBmaxlen, DBdrop=self.DBdrop)
+
+        # gs534 - SLU related
+        self.jointrep = getattr(args, 'jointrep', False)
+        self.doslu = getattr(args, 'doslu', False)
+        self.useslotKB = getattr(args, 'slotKB', False)
+        self.graphslot = getattr(args, 'graphslot', 0.0)
+        if self.doslu:
+            jointdim = getattr(args, 'robertadim', 768)
+            self.roberta_mask = getattr(args, 'robertamask', 0)
+            self.jointptrgen = getattr(args, 'jointptrgen', 0)
+            self.topn = getattr(args, 'topnslot', 1)
+            self.sluproc = SLUutils(args.intentfile, args.slotfile, self.char_list,
+                                    wordlevel=getattr(args, 'wordlevel', False), ontology=getattr(args, 'ontology', None))
+            if self.useslotKB:
+                self.meeting_KB.get_tree_from_classes(self.sluproc.ontology, list(self.sluproc.ontology.keys()))
+            outputunits = args.dunits + args.eprojs if args.context_residual else args.dunits
+            self.slunet = SLUNet(outputunits, self.sluproc.nslots, self.sluproc.nintents, args.slotfactor,
+                                 args.intentfactor, self.char_list, jointdim, self.domm, self.jointrep, self.mmfactor,
+                                 self.graphslot)
 
         # subsample info
         self.subsample = get_subsample(args, mode="asr", arch="rnn")
@@ -192,11 +222,15 @@ class E2E(ASRInterface, torch.nn.Module):
         self.att = att_for(args)
         # decoder
         self.dec = decoder_for(args, odim, self.sos, self.eos, self.att, labeldist,
-            meetingKB=self.meeting_KB if self.mbr_use_KB else None)
+            meetingKB=self.meeting_KB[0] if isinstance(self.meeting_KB, list) else self.meeting_KB)
 
         # weight initialization
         self.init_from = getattr(args, 'init_full_model', None)
         self.init_like_chainer()
+
+        # Load Roberta model
+        if self.domm or self.jointrep:
+            self.roberta = Roberta_encoder(pooling=args.pooling, loadfrom=getattr(args, 'init_roberta_model', None))
 
         # options for beam search
         if args.report_cer or args.report_wer:
@@ -261,7 +295,7 @@ class E2E(ASRInterface, torch.nn.Module):
         model_init = torch.load(self.init_from, map_location=lambda storage, loc: storage)
         model_init = model_init.state_dict() if not isinstance(model_init, dict) else model_init
         # import pdb; pdb.set_trace()
-        self.load_state_dict(model_init, strict=False)
+        # self.load_state_dict(model_init, strict=False)
         # own_state = self.state_dict()
         # for name, param in model_init.items():
         #     if name in own_state:
@@ -280,7 +314,7 @@ class E2E(ASRInterface, torch.nn.Module):
         hs_pad, hlens, _ = self.enc(hs_pad, hlens)
         return hs_pad, hlens
 
-    def forward(self, xs_pad, ilens, ys_pad, meetings=None):
+    def forward(self, xs_pad, ilens, ys_pad, meetings=None, orig_text=None, intents=None, slots=None):
         """E2E forward.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, idim)
@@ -289,6 +323,11 @@ class E2E(ASRInterface, torch.nn.Module):
         :return: loss value
         :rtype: torch.Tensor
         """
+        # 0. get slu labels
+        if self.doslu:
+            intlabel, slotlabel, slotshortlist, slotmaskmap = self.sluproc.get_intent_labels(intents, slots, ys_pad,
+                ndistractors=self.topn)
+            slottrue = self.sluproc.get_slot_true_entries(slots, orig_text, slotshortlist)
         # 1. forward front end & encoder
         hs_pad, hlens = self.forward_frontend_and_encoder(xs_pad, ilens)
 
@@ -302,17 +341,48 @@ class E2E(ASRInterface, torch.nn.Module):
         if self.mtlalpha == 1:
             self.loss_att, acc = None, None
         else:
-            # gs534 - TCPGen
+            # gs534 - meeting KB
             meeting_info = None
-            if self.meeting_KB is not None:
+            if self.meeting_KB is not None and not self.useslotKB:
                 # self.meeting_KB.DBdrop = self.DBdrop if self.training else 0
                 meeting_info = self.meeting_KB.get_meeting_KB(meetings, ilens.size(0))
 
-            self.loss_att, acc, _, lossGT = self.dec(hs_pad, hlens, ys_pad,
-                meeting_info=meeting_info if self.mbr_use_KB else None, useGT=self.useGT)
+            # Modality Matching
+            mmembs = None
+            if self.domm or self.jointrep:
+                mmembs = self.roberta(orig_text, training=self.jointrep)
+
+            if self.doslu and self.useslotKB and self.dec.epoch >= self.dec.PtrSche:
+                self.meeting_KB.get_tree_from_classes(self.sluproc.ontology, list(self.sluproc.ontology.keys()),
+                    drop=self.DBdrop, loaded=True, truelist=slottrue)
+                for i in range(len(self.meeting_KB.classtrees)):
+                    if self.meeting_KB.classtrees[i][0] != {}:
+                        self.dec.encode_tree(self.meeting_KB.classtrees[i])
+                # with torch.no_grad():
+                #     _, _, _, doutput, ptr_gen = self.dec(hs_pad, hlens, ys_pad)
+            else:
+                self.loss_att, acc, _, doutput, ptr_gen, classpost = self.dec(hs_pad, hlens, ys_pad, meeting_info=meeting_info)
+
+            # SLU loss
+            self.sluloss = 0
+            self.loss_mm = 0
+            self.slotacc, self.intentacc = 0, 0
+            # if self.doslu and not self.useslotKB:
+            #     self.sluloss, self.loss_mm, self.slotacc, self.intentacc = self.slunet(doutput, ys_pad, to_device(self, intlabel),
+            #         to_device(self, slotlabel), mmembs, maskfactor=self.roberta_mask, ptr_gen=ptr_gen)
+            if self.doslu and self.useslotKB:
+                # slotshortlist = self.slunet.inference_batch(doutput, ys_pad, to_device(self, slotlabel), mmembs,
+                #                                             topn=self.topn, ptr_gen=ptr_gen)
+                # wlists = self.sluproc.get_wlist_from_slots(slotshortlist, self.DBdrop)
+                # meeting_info = self.meeting_KB.get_slot_KB(wlists)
+                # slotshortlist = self.sluproc.get_slot_names(slotshortlist)
+                meeting_info = (None, None, [self.meeting_KB.get_classed_trees(slotlist, named=True) for slotlist in slotshortlist])
+                self.loss_att, acc, _, doutput, ptr_gen, classpost = self.dec(hs_pad, hlens, ys_pad, meeting_info=meeting_info)
+                self.sluloss, self.loss_mm, self.slotacc, self.intentacc = self.slunet(doutput, ys_pad, to_device(self, intlabel),
+                    to_device(self, slotlabel), mmembs, maskfactor=self.roberta_mask, classpost=classpost, slotmap=to_device(self, slotmaskmap))
 
             # gs534 - MBR training
-            if self.use_mbrloss and self.dec.epoch >= self.cfm_mbr_start:
+            if self.use_mbrloss and ys_pad.size(1) > 0 and self.dec.epoch >= self.cfm_mbr_start:
                 #  set maximum decoding length to avoid running out of mem
                 y_maxlen = min(int(ys_pad.size(1) * 1.5), hlens.max(), 210)
                 # print(ys_pad.size())
@@ -320,7 +390,7 @@ class E2E(ASRInterface, torch.nn.Module):
                                                     nbest=self.mbrnbest, maxlen=y_maxlen, meeting_info=meeting_info)
                 lossGT = lossGT.view(ys_pad.size(0), -1).sum(1) if self.useGT else None
                 if self.meeting_KB is not None:
-                    self.mbrloss, self.mbrloss_unnorm = self.get_KBmbr_loss_new(ys_pad, nbest, meeting_info[1], loss_sep=lossGT)
+                    self.mbrloss, self.mbrloss_unnorm = self.get_KBmbr_loss(ys_pad, nbest, meeting_info[1], loss_sep=lossGT)
                 else:
                     self.mbrloss, self.mbrloss_unnorm = self.get_mbr_loss(ys_pad, nbest, loss_sep=lossGT)
                 self.loss_att = self.mbrlambda * self.loss_att + self.mbrloss
@@ -411,9 +481,11 @@ class E2E(ASRInterface, torch.nn.Module):
 
         alpha = self.mtlalpha
         if alpha == 0:
-            self.loss = self.loss_att
+            self.loss = self.loss_att + self.sluloss
             loss_att_data = float(self.loss_att)
             loss_mbr_data = float(self.mbrloss_unnorm)
+            loss_mm_data = float(self.loss_mm)
+            loss_slu_data = float(self.sluloss)
             loss_ctc_data = None
         elif alpha == 1:
             self.loss = self.loss_ctc
@@ -427,7 +499,8 @@ class E2E(ASRInterface, torch.nn.Module):
         loss_data = float(self.loss)
         if loss_data < CTC_LOSS_THRESHOLD and not math.isnan(loss_data):
             self.reporter.report(
-                loss_ctc_data, loss_att_data, acc, cer_ctc, cer, wer, loss_data, loss_mbr_data
+                loss_ctc_data, loss_att_data, acc, cer_ctc, cer, wer, loss_data, loss_mbr_data,
+                loss_mm_data, loss_slu_data, self.slotacc, self.intentacc
             )
         else:
             logging.warning("loss (=%f) is not correct", loss_data)
@@ -458,7 +531,8 @@ class E2E(ASRInterface, torch.nn.Module):
         return hs.squeeze(0)
 
     def recognize(self, x, recog_args, char_list, rnnlm=None, meetings=None,
-                  estlm=None, estlm_factor=0.0, sel_lm=None, prev_hid=None):
+                  best_fusion=None, estlm=None, estlm_factor=0.0, best_est=None,
+                  sel_lm=None, prev_hid=None, slotlist=[], oracletext=None):
         """E2E beam search.
 
         :param ndarray x: input acoustic feature (T, D)
@@ -475,21 +549,56 @@ class E2E(ASRInterface, torch.nn.Module):
         else:
             lpz = None
 
-        # Get biasing info
+        # Get KB info
         meeting_info = None
-        if self.meeting_KB is not None and not recog_args.select:
+        if self.meeting_KB is not None and not recog_args.select and not recog_args.slotlist:
             meeting_info = self.meeting_KB.get_meeting_KB(meetings, 1)
+        elif self.meeting_KB is not None and not recog_args.select and recog_args.slotlist:
+            if slotlist != []:
+                # meeting_info = (self.meeting_KB.full_wordlist, None,
+                #                 [self.meeting_KB.get_classed_trees(slotlist[:recog_args.topk], named=True)])
+                wlists = [self.meeting_KB.get_classed_trees(slotlist[:recog_args.topk])]
+                meeting_info = self.meeting_KB.get_slot_KB(wlists)
+            else:
+                meeting_info = []
         elif self.meeting_KB is not None and recog_args.select:
             meeting_info = (self.meeting_KB.full_wordlist, meetings if recog_args.nbestKB else None,
                 self.meeting_KB.full_lextree)
 
         # 2. Decoder
         # decode the first utterance
-        y, best_hid = self.dec.recognize_beam(hs[0], lpz, recog_args, char_list, rnnlm,
-                                    meeting_info=meeting_info, ranking_norm=recog_args.ranking_norm,
-                                    estlm=estlm, estlm_factor=estlm_factor, sel_lm=sel_lm,
-                                    topk=recog_args.topk, prev_hid=prev_hid,classlm=recog_args.classlm)
-        return y, best_hid
+        y, best_fusion, best_est, best_hid = self.dec.recognize_beam(hs[0], lpz, recog_args, char_list, rnnlm,
+                                                           meeting_info=meeting_info,
+                                                           ranking_norm=recog_args.ranking_norm,
+                                                           fusion_lm_hidden=best_fusion, 
+                                                           estlm=estlm, estlm_factor=estlm_factor,
+                                                           estlm_hid=best_est, dynamic_disc=recog_args.dynamic_disc,
+                                                           sel_lm=sel_lm, topk=recog_args.topk, prev_hid=prev_hid,
+                                                           classlm=recog_args.classlm, slotlist=recog_args.slotlist)
+
+        # oracle text
+        if oracletext is not None:
+            hlens = [hs.size(1)]
+            ys_pad = torch.LongTensor(oracletext).unsqueeze(0)
+            self.loss_att, acc, _, doutput, ptr_gen = self.dec(hs, hlens, ys_pad, meeting_info=meeting_info)
+            y[0]['hidden_states'] = [doutput.squeeze(0)]
+            y[0]['yseq'] = [self.sos] + oracletext + [self.eos]
+
+        # Modality Matching
+        mmembs = None
+        if self.domm or self.jointrep:
+            orig_text = ''.join([self.char_list[idx] for idx in y[0]['yseq'][1:-1]]).strip('▁').replace('▁', ' ')
+            mmembs = self.roberta([orig_text.lower()], training=self.jointrep)
+
+        # SLU prediction
+        if self.doslu:
+            slots, intent, shortlist = self.slunet.inference(y[0]['hidden_states'], y[0]['yseq'][1:],
+                                                             mmemb=mmembs, ptr_gen=y[0]['p_gen'] if 'p_gen' in y[0] else None)
+            slots, intent, shortlist = self.sluproc.predict(slots, intent, y[0]['yseq'][1:], shortlist)
+            y[0]['slots'] = slots
+            y[0]['intent_pred'] = intent
+            y[0]['shortlist'] = shortlist
+        return y, best_fusion, best_est, best_hid
 
     def recognize_batch(self, xs, recog_args, char_list, rnnlm=None):
         """E2E batch beam search.
@@ -559,7 +668,7 @@ class E2E(ASRInterface, torch.nn.Module):
             self.train()
         return enhanced.cpu().numpy(), mask.cpu().numpy(), ilens
 
-    def calculate_all_attentions(self, xs_pad, ilens, ys_pad, meetings=None):
+    def calculate_all_attentions(self, xs_pad, ilens, ys_pad, meetings=None, orig_text=None, intents=None, slots=None):
         """E2E attention calculation.
 
         :param torch.Tensor xs_pad: batch of padded input sequences (B, Tmax, idim)
@@ -630,61 +739,18 @@ class E2E(ASRInterface, torch.nn.Module):
                 seq_true = [self.char_list[int(idx)] for idx in y_true if int(idx) != -1]
                 seq_true_text = "".join(seq_true).replace('▁', ' ')
                 ref_words = seq_true_text.split()
-                # word_ref_lens.append(len(ref_words))
-                # ref_chars = seq_true_text.replace(' ', '')
-                # char_ref_lens.append(len(ref_chars))
-                # werrors = ys_pad.new_zeros(len(sample), dtype=torch.float)
                 werrors = [0] if loss_sep is not None else []
                 for j, each_hyp in enumerate(sample):
                     y_hat = each_hyp['yseq'][1:-1]
                     seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
-                    seq_hat_text = "".join(seq_hat).replace('▁', ' ')
-                    hyp_words = seq_hat_text.split()
-                    werrors.append(editdistance.eval(hyp_words, ref_words) * self.mwe_factor)
-                    # hyp_chars = seq_hat_text.replace(' ', '')
-                    # char_eds.append(editdistance.eval(hyp_chars, ref_chars))
+                    if self.use_wp_errors:
+                        werrors.append(editdistance.eval(seq_hat, seq_true) * self.mwe_factor)
+                    else:
+                        seq_hat_text = "".join(seq_hat).replace('▁', ' ')
+                        hyp_words = seq_hat_text.split()
+                        werrors.append(editdistance.eval(hyp_words, ref_words) * self.mwe_factor)
                 werrors = torch.tensor(werrors).to(normalised_prob.device)
                 mbr_loss = torch.sum(normalised_prob * (werrors - werrors.mean()))
-                mbr_loss_list.append(mbr_loss)
-                mbr_loss_unnorm.append(torch.sum(normalised_prob * werrors))
-        mbr_loss = torch.stack(mbr_loss_list).mean() if len(mbr_loss_list) > 0 else 0 
-        mbr_loss_unnorm = torch.stack(mbr_loss_unnorm).mean().item() if len(mbr_loss_list) > 0 else 0
-        return mbr_loss, mbr_loss_unnorm
-
-    def get_KBmbr_loss(self, ys_pad, batched_hyps, KBwordlist, loss_sep=None):
-        mbr_loss_list = []
-        mbr_loss_unnorm = []
-        KBwordlist = [''.join(word).replace('▁', '') for word in KBwordlist]
-        for i, sample in enumerate(batched_hyps):
-            if len(sample) > 1:
-                y_true = ys_pad[i]
-                if loss_sep is not None:
-                    normalised_prob = torch.stack([-loss_sep[i]] + [each_hyp['vscore'] for each_hyp in sample])
-                else:
-                    normalised_prob = torch.stack([each_hyp['vscore'] for each_hyp in sample])
-                normalised_prob = torch.softmax(normalised_prob, dim=-1)
-
-                seq_true = [self.char_list[int(idx)] for idx in y_true if int(idx) != -1]
-                seq_true_text = "".join(seq_true).replace('▁', ' ')
-                ref_words = seq_true_text.split()
-                rare_seq_ref = []
-                for word in ref_words:
-                    if word in KBwordlist:
-                        rare_seq_ref.append(word)
-                werrors = [0] if loss_sep is not None else []
-                for j, each_hyp in enumerate(sample):
-                    y_hat = each_hyp['yseq'][1:-1]
-                    seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
-                    seq_hat_text = "".join(seq_hat).replace('▁', ' ')
-                    hyp_words = seq_hat_text.split()
-                    werrors.append(editdistance.eval(hyp_words, ref_words) * self.mwe_factor)
-                    if rare_seq_ref != []:
-                        hyp_KBwords = [word for word in hyp_words if word in KBwordlist]
-                        rwerrors = editdistance.eval(hyp_KBwords, rare_seq_ref)
-                        werrors[-1] += self.rareweight * rwerrors
-                werrors = torch.tensor(werrors).to(ys_pad.device)
-                mbr_loss = torch.sum(normalised_prob * (werrors - werrors.mean()))
-                # mbr_loss = torch.sum(normalised_prob * werrors)
                 mbr_loss_list.append(mbr_loss)
                 mbr_loss_unnorm.append(torch.sum(normalised_prob * werrors))
         mbr_loss = torch.stack(mbr_loss_list).mean() if len(mbr_loss_list) > 0 else 0
@@ -718,7 +784,7 @@ class E2E(ASRInterface, torch.nn.Module):
                 cursor += 1
         return total_rare_errors
 
-    def get_KBmbr_loss_new(self, ys_pad, batched_hyps, KBwplist, loss_sep=None):
+    def get_KBmbr_loss(self, ys_pad, batched_hyps, KBwplist, loss_sep=None):
         mbr_loss_list = []
         mbr_loss_unnorm = []
         KBwordlist = [''.join(word).replace('▁', '') for word in KBwplist]
@@ -749,18 +815,18 @@ class E2E(ASRInterface, torch.nn.Module):
                     seq_hat = [self.char_list[int(idx)] for idx in y_hat if int(idx) != -1]
                     seq_hat_text = "".join(seq_hat).replace('▁', ' ')
                     hyp_words = seq_hat_text.split()
-                    werrors.append(editdistance.eval(hyp_words, ref_words))
                     if self.use_wp_errors:
-                        # werrors.append(editdistance.eval(seq_hat, seq_true))
+                        werrors.append(editdistance.eval(hyp_words, ref_words))
+                        distance = editDistance(seq_true, seq_hat)
                         # werrors.append(distance[len(seq_true)][len(seq_hat)])
                         if rare_seq_ref != []:
-                            distance = editDistance(seq_true, seq_hat)
                             step_list = getStepList(seq_true, seq_hat, distance)
                             rare_errors = self.get_rare_errors(wp_align_list, seq_true, step_list)
-                            rwerrors.append(rare_errors if rare_errors != 0 else 0)
+                            rwerrors.append(rare_errors)
                         else:
                             rwerrors.append(0)
                     else:
+                        werrors.append(editdistance.eval(hyp_words, ref_words))
                         if rare_seq_ref != []:
                             hyp_KBwords = [word for word in hyp_words if word in KBwordlist]
                             rwerrors.append(editdistance.eval(hyp_KBwords, rare_seq_ref))
