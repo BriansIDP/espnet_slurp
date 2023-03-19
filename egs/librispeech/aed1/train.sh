@@ -4,7 +4,7 @@ export PYTHONPATH="/scratch/OpenSource/espnet/espnet/nets/pytorch_backend/lm:$PY
 
 train_config=conf/train_TCPGen_100.yaml
 backend=pytorch
-expname=Librispeech_TCPGen_baseline
+expname=Librispeech_AED_TCPGen_GCNII2L
 preprocess_config=conf/specaug_tm.yaml
 
 # lexicon_path=/home/dawna/gs534/espnet-KG/egs/ami/ami_lextree/data/local/wordlm_train/rarewords.txt

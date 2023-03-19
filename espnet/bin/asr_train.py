@@ -291,6 +291,12 @@ def get_parser(parser=None, required=True):
                        help='Type of GNN to use')
     parser.add_argument('--treehid', default=0, type=int,
                        help='Tree network hidden state dims')
+    parser.add_argument('--treeresidual', default=False, type=strtobool,
+                       help='GNN residual connection')
+    parser.add_argument('--gnntie', default=False, type=strtobool,
+                       help='GNN tie parameters')
+    parser.add_argument('--gnnheads', default=1, type=int,
+                       help='GNN number of heads for different depth')
     parser.add_argument('--sampler', default=False, type=strtobool,
                        help='Use sequential sampler for training dataloader')
     parser.add_argument('--modalitymatch', default=False, type=strtobool,
@@ -325,10 +331,14 @@ def get_parser(parser=None, required=True):
                         help='Path to the slot-value file')
     parser.add_argument('--topnslot', default=1, type=int,
                        help='Number of shortlisted slots')
-    parser.add_argument('--graphslot', default=0.0, type=float,
-                       help='use graph class posterior for slot filling')
-    parser.add_argument('--stacked', default=False, type=strtobool,
-                       help='Whether or not using stacked attention')
+    parser.add_argument('--mixup', default=0.0, type=float,
+                       help='ratio of text and audio input in a minibatch')
+    parser.add_argument('--classpost', default=False, type=strtobool,
+                       help='Whether or not to use class posterior')
+    parser.add_argument('--classpostfactor', default=0.0, type=float,
+                       help='Factor for class posterior')
+    parser.add_argument('--classentity', default=False, type=strtobool,
+                       help='Whether or not to use entities for class KB')
     parser.add_argument(
         "--init-roberta-model",
         default=None,

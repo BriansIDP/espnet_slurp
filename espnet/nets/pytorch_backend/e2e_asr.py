@@ -10,7 +10,6 @@ import math
 import os
 import random
 import time
-from copy import deepcopy
 
 import chainer
 from chainer import reporter
@@ -48,7 +47,7 @@ from espnet.nets.pytorch_backend.KB_utils.wer import editDistance, getStepList
 from espnet.nets.scorers.ctc import CTCPrefixScorer
 from espnet.utils.fill_missing_args import fill_missing_args
 # Modality matching
-from espnet.nets.pytorch_backend.modality.roberta import Roberta_encoder
+# from espnet.nets.pytorch_backend.modality.roberta import Roberta_encoder
 
 CTC_LOSS_THRESHOLD = 10000
 
@@ -164,6 +163,9 @@ class E2E(ASRInterface, torch.nn.Module):
         self.KBminlen = getattr(args, 'KBminlen', args.KBmaxlen)
         self.mmfactor = getattr(args, 'mmfactor', 0.0)
         self.domm = getattr(args, 'modalitymatch', False)
+        self.classpost = getattr(args, 'classpost', False)
+        self.classpostfactor = getattr(args, 'classpostfactor', 0.0)
+        self.classentity = getattr(args, 'classentity', False)
         if getattr(args, 'meetingKB', False) and getattr(args, 'meetingpath', '') != '':
             if self.n_KBs == 0:
                 if args.randomKBsample:
@@ -180,20 +182,17 @@ class E2E(ASRInterface, torch.nn.Module):
         self.jointrep = getattr(args, 'jointrep', False)
         self.doslu = getattr(args, 'doslu', False)
         self.useslotKB = getattr(args, 'slotKB', False)
-        self.graphslot = getattr(args, 'graphslot', 0.0)
         if self.doslu:
             jointdim = getattr(args, 'robertadim', 768)
             self.roberta_mask = getattr(args, 'robertamask', 0)
-            self.jointptrgen = getattr(args, 'jointptrgen', 0)
+            self.jointptrgen = getattr(args, 'jointptrgen', False)
             self.topn = getattr(args, 'topnslot', 1)
             self.sluproc = SLUutils(args.intentfile, args.slotfile, self.char_list,
                                     wordlevel=getattr(args, 'wordlevel', False), ontology=getattr(args, 'ontology', None))
-            if self.useslotKB:
-                self.meeting_KB.get_tree_from_classes(self.sluproc.ontology, list(self.sluproc.ontology.keys()))
             outputunits = args.dunits + args.eprojs if args.context_residual else args.dunits
             self.slunet = SLUNet(outputunits, self.sluproc.nslots, self.sluproc.nintents, args.slotfactor,
                                  args.intentfactor, self.char_list, jointdim, self.domm, self.jointrep, self.mmfactor,
-                                 self.graphslot)
+                                 self.jointptrgen, getattr(args, 'mixup', 0), self.classpost, self.classpostfactor)
 
         # subsample info
         self.subsample = get_subsample(args, mode="asr", arch="rnn")
@@ -325,9 +324,8 @@ class E2E(ASRInterface, torch.nn.Module):
         """
         # 0. get slu labels
         if self.doslu:
-            intlabel, slotlabel, slotshortlist, slotmaskmap = self.sluproc.get_intent_labels(intents, slots, ys_pad,
-                ndistractors=self.topn)
-            slottrue = self.sluproc.get_slot_true_entries(slots, orig_text, slotshortlist)
+            intlabel, slotlabel, ptrlabel, slotshortlist, slotmap  = self.sluproc.get_intent_labels(intents, slots, ys_pad,
+                KBwords=self.meeting_KB.rarewords_word if self.meeting_KB is not None else [], ndistractors=self.topn)
         # 1. forward front end & encoder
         hs_pad, hlens = self.forward_frontend_and_encoder(xs_pad, ilens)
 
@@ -352,34 +350,36 @@ class E2E(ASRInterface, torch.nn.Module):
             if self.domm or self.jointrep:
                 mmembs = self.roberta(orig_text, training=self.jointrep)
 
-            if self.doslu and self.useslotKB and self.dec.epoch >= self.dec.PtrSche:
-                self.meeting_KB.get_tree_from_classes(self.sluproc.ontology, list(self.sluproc.ontology.keys()),
-                    drop=self.DBdrop, loaded=True, truelist=slottrue)
-                for i in range(len(self.meeting_KB.classtrees)):
-                    if self.meeting_KB.classtrees[i][0] != {}:
-                        self.dec.encode_tree(self.meeting_KB.classtrees[i])
-                # with torch.no_grad():
-                #     _, _, _, doutput, ptr_gen = self.dec(hs_pad, hlens, ys_pad)
-            else:
-                self.loss_att, acc, _, doutput, ptr_gen, classpost = self.dec(hs_pad, hlens, ys_pad, meeting_info=meeting_info)
+            if self.doslu and self.useslotKB and not self.classpost:
+                with torch.no_grad():
+                    _, _, _, doutput, ptr_gen, _, _ = self.dec(hs_pad, hlens, ys_pad)
+            elif not self.doslu:
+                self.loss_att, acc, _, doutput, ptr_gen, _, _ = self.dec(hs_pad, hlens, ys_pad, meeting_info=meeting_info)
 
             # SLU loss
             self.sluloss = 0
             self.loss_mm = 0
             self.slotacc, self.intentacc = 0, 0
-            # if self.doslu and not self.useslotKB:
-            #     self.sluloss, self.loss_mm, self.slotacc, self.intentacc = self.slunet(doutput, ys_pad, to_device(self, intlabel),
-            #         to_device(self, slotlabel), mmembs, maskfactor=self.roberta_mask, ptr_gen=ptr_gen)
-            if self.doslu and self.useslotKB:
-                # slotshortlist = self.slunet.inference_batch(doutput, ys_pad, to_device(self, slotlabel), mmembs,
-                #                                             topn=self.topn, ptr_gen=ptr_gen)
-                # wlists = self.sluproc.get_wlist_from_slots(slotshortlist, self.DBdrop)
-                # meeting_info = self.meeting_KB.get_slot_KB(wlists)
-                # slotshortlist = self.sluproc.get_slot_names(slotshortlist)
-                meeting_info = (None, None, [self.meeting_KB.get_classed_trees(slotlist, named=True) for slotlist in slotshortlist])
-                self.loss_att, acc, _, doutput, ptr_gen, classpost = self.dec(hs_pad, hlens, ys_pad, meeting_info=meeting_info)
+            if self.doslu and not self.useslotKB:
                 self.sluloss, self.loss_mm, self.slotacc, self.intentacc = self.slunet(doutput, ys_pad, to_device(self, intlabel),
-                    to_device(self, slotlabel), mmembs, maskfactor=self.roberta_mask, classpost=classpost, slotmap=to_device(self, slotmaskmap))
+                    to_device(self, slotlabel), mmembs, maskfactor=self.roberta_mask)
+            elif self.doslu and self.useslotKB:
+                if not self.classpost:
+                    slotshortlist = self.slunet.inference_batch(doutput, ys_pad, to_device(self, slotlabel), mmembs,
+                                                                topn=self.topn)
+                wlists, slotwlists = self.sluproc.get_wlist_from_slots(slotshortlist, self.DBdrop)
+                meeting_info = self.meeting_KB.get_slot_KB(wlists, self.classentity)
+                if self.classpost:
+                    slottrees = self.meeting_KB.get_slot_sep_KB(slotwlists, self.classentity)
+                else:
+                    slottrees = None
+                self.loss_att, acc, _, doutput, ptr_gen, classpost, KBemb = self.dec(hs_pad, hlens, ys_pad, meeting_info=meeting_info,
+                                                                                     slottrees=slottrees)
+                if classpost != []:
+                    classpost = torch.einsum("ijk,ikl->ijl", classpost, to_device(self, slotmap))
+                self.sluloss, self.loss_mm, self.slotacc, self.intentacc = self.slunet(doutput, ys_pad, to_device(self, intlabel),
+                    to_device(self, slotlabel), mmembs, maskfactor=self.roberta_mask, ptr_gen=ptr_gen, classpost=classpost,
+                    KBemb=KBemb)
 
             # gs534 - MBR training
             if self.use_mbrloss and ys_pad.size(1) > 0 and self.dec.epoch >= self.cfm_mbr_start:
@@ -532,7 +532,7 @@ class E2E(ASRInterface, torch.nn.Module):
 
     def recognize(self, x, recog_args, char_list, rnnlm=None, meetings=None,
                   best_fusion=None, estlm=None, estlm_factor=0.0, best_est=None,
-                  sel_lm=None, prev_hid=None, slotlist=[], oracletext=None):
+                  sel_lm=None, prev_hid=None, slotlist=[], oracletext=None, unigram=None):
         """E2E beam search.
 
         :param ndarray x: input acoustic feature (T, D)
@@ -551,19 +551,26 @@ class E2E(ASRInterface, torch.nn.Module):
 
         # Get KB info
         meeting_info = None
+        classmask = None
+        classmap = None
         if self.meeting_KB is not None and not recog_args.select and not recog_args.slotlist:
             meeting_info = self.meeting_KB.get_meeting_KB(meetings, 1)
         elif self.meeting_KB is not None and not recog_args.select and recog_args.slotlist:
             if slotlist != []:
-                # meeting_info = (self.meeting_KB.full_wordlist, None,
-                #                 [self.meeting_KB.get_classed_trees(slotlist[:recog_args.topk], named=True)])
-                wlists = [self.meeting_KB.get_classed_trees(slotlist[:recog_args.topk])]
-                meeting_info = self.meeting_KB.get_slot_KB(wlists)
+                meeting_info = (self.meeting_KB.full_wordlist, None,
+                                [self.meeting_KB.get_classed_trees(slotlist[:recog_args.topk], named=True)])
+                classmap = []
+                for slot in slotlist:
+                    mapvec = [0 for i in range(len(self.sluproc.ids2slot))]
+                    mapvec[self.sluproc.slot2ids[slot]] = 1
+                    classmap.append(mapvec)
+                classmap = to_device(self, torch.Tensor(classmap))
             else:
                 meeting_info = []
         elif self.meeting_KB is not None and recog_args.select:
             meeting_info = (self.meeting_KB.full_wordlist, meetings if recog_args.nbestKB else None,
                 self.meeting_KB.full_lextree)
+            classmask = torch.tensor([0 if tree[0] != {} else 1 for tree in self.meeting_KB.classtrees])
 
         # 2. Decoder
         # decode the first utterance
@@ -574,7 +581,8 @@ class E2E(ASRInterface, torch.nn.Module):
                                                            estlm=estlm, estlm_factor=estlm_factor,
                                                            estlm_hid=best_est, dynamic_disc=recog_args.dynamic_disc,
                                                            sel_lm=sel_lm, topk=recog_args.topk, prev_hid=prev_hid,
-                                                           classlm=recog_args.classlm, slotlist=recog_args.slotlist)
+                                                           classlm=recog_args.classlm, slotlist=recog_args.slotlist,
+                                                           unigram=unigram, classmask=classmask, fixedclassmap=classmap)
 
         # oracle text
         if oracletext is not None:
@@ -593,12 +601,14 @@ class E2E(ASRInterface, torch.nn.Module):
         # SLU prediction
         if self.doslu:
             slots, intent, shortlist = self.slunet.inference(y[0]['hidden_states'], y[0]['yseq'][1:],
-                                                             mmemb=mmembs, ptr_gen=y[0]['p_gen'] if 'p_gen' in y[0] else None)
+                                                             mmemb=mmembs, ptr_gen=y[0]['p_gen'] if 'p_gen' in y[0] else None,
+                                                             clspost=y[0]['clspost'] if 'clspost' in y[0] else None,
+                                                             KBemb=y[0]['KBemb'])
             slots, intent, shortlist = self.sluproc.predict(slots, intent, y[0]['yseq'][1:], shortlist)
             y[0]['slots'] = slots
             y[0]['intent_pred'] = intent
             y[0]['shortlist'] = shortlist
-        return y, best_fusion, best_est, best_hid
+        return y, best_fusion, best_est, None # best_hid
 
     def recognize_batch(self, xs, recog_args, char_list, rnnlm=None):
         """E2E batch beam search.

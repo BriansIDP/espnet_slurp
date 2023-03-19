@@ -52,6 +52,7 @@ from espnet.utils.fill_missing_args import fill_missing_args
 # gs534 - add KB classes
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeeting, KBmeetingTrain
 from espnet.nets.pytorch_backend.KB_utils.KB import KBmeetingTrainContext, Vocabulary
+from espnet.nets.pytorch_backend.KB_utils.GNN import GCN, GSage, SageMean, APPNP, GCNII, GCNSage
 from espnet.nets.pytorch_backend.nets_utils import to_device
 # gs534 - MBR loss
 from espnet.nets.beam_search_transducer import BeamSearchTransducer
@@ -306,6 +307,14 @@ class E2E(ASRInterface, torch.nn.Module):
         self.KBin = getattr(args, 'PtrKBin', 1.0)
         self.treetype = getattr(args, 'treetype', '')
         self.tree_hid = getattr(args, 'treehid', 0)
+        self.residual = getattr(args, 'treeresidual', False)
+        self.gnntie = getattr(args, 'gnntie', False)
+        self.gnnheads = getattr(args, 'gnnheads', 1)
+        if self.treetype.startswith('jknet'):
+            self.treetype = self.treetype[5:]
+            self.jknet = True
+        else:
+            self.jknet = False
         if args.meetingKB and args.meetingpath != '':
             if self.n_KBs == 0:
                 if args.randomKBsample:
@@ -322,22 +331,58 @@ class E2E(ASRInterface, torch.nn.Module):
             # Use pointer generator
             if self.PtrGen:
                 self.embdim = args.dec_embed_dim
-                # Define graph neural net parameters
+                ### Define graph neural net parameters
                 self.tree_hid = self.embdim if self.tree_hid == 0 else self.tree_hid
                 if self.treetype.startswith('gcn'):
-                    self.gcn_l1 = torch.nn.Linear(self.embdim, self.tree_hid)
-                    self.gcn_l2 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-                    if self.treetype[-1] == '3':
-                        self.gcn_l3 = torch.nn.Linear(self.tree_hid, self.tree_hid)
+                    self.gcn = GCN(self.embdim, self.tree_hid, int(self.treetype[3:]),
+                                   args.dropout_rate_embed_decoder, residual=self.residual,
+                                   tied=self.gnntie, nhead=self.gnnheads)
+                elif self.treetype.startswith('sage'):
+                    if 'mean' in self.treetype:
+                        self.sage = SageMean(self.embdim, self.tree_hid, int(self.treetype[8:]),
+                                             args.dropout_rate_embed_decoder, residual=self.residual)
+                    else:
+                        self.sage = GSage(self.embdim, self.tree_hid, int(self.treetype[4:]),
+                                          args.dropout_rate_embed_decoder, residual=self.residual,
+                                          nhead=self.gnnheads)
+                elif self.treetype.startswith('appnp'):
+                    gnnlayers = int(self.treetype[8:]) if self.treetype.startswith('appnpmax') else int(self.treetype[5:])
+                    maxpool = self.treetype.startswith('appnpmax')
+                    self.appnp = APPNP(self.embdim, self.tree_hid, gnnlayers,
+                                       args.dropout_rate_embed_decoder, residual=self.residual,
+                                       maxpool=maxpool)
+                elif self.treetype.startswith('iigcn'):
+                    self.gcnii = GCNII(self.embdim, self.tree_hid, int(self.treetype[5:]), 
+                                       args.dropout_rate_embed_decoder, residual=self.residual,
+                                       tied=self.gnntie, nhead=self.gnnheads)
+                elif self.treetype.startswith('comb'):
+                    self.combined = GCNSage(self.embdim, self.tree_hid, int(self.treetype[4:]),
+                                            args.dropout_rate_embed_decoder, residual=self.residual,
+                                            tied=self.gnntie, nhead=self.gnnheads//2)
                 else:
                     self.recursive_proj = torch.nn.Linear(self.embdim+self.tree_hid, self.tree_hid)
 
-                self.ooKBemb = torch.nn.Embedding(1, self.tree_hid)
-                self.Qproj_char = torch.nn.Linear(args.dec_embed_dim, self.attn_dim)
-                # self.Qproj_char = torch.nn.Linear(decoder_out, self.attn_dim)
-                self.Qproj_acoustic = torch.nn.Linear(encoder_out, self.attn_dim)
-                self.Kproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
-                self.pointer_gate = torch.nn.Linear(self.attn_dim+args.joint_dim, 1)
+                if self.gnnheads > 1 and not self.jknet:
+                    self.ooKBemb = torch.nn.Embedding(1, self.tree_hid*self.gnnheads)
+                    # self.Kproj = torch.nn.Linear(self.tree_hid, self.tree_hid)
+                    # self.Qproj_char = torch.nn.Linear(args.dec_embed_dim, self.tree_hid*self.gnnheads)
+                    # self.Qproj_acoustic = torch.nn.Linear(encoder_out, self.tree_hid*self.gnnheads)
+                    # self.pointer_gate = torch.nn.Linear(self.tree_hid+args.joint_dim, 1)
+                    # self.attn_dim = self.tree_hid # Hack here, not compatible with self.DBembed
+                    self.Kproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
+                    self.Qproj_char = torch.nn.Linear(args.dec_embed_dim, self.attn_dim*self.gnnheads)
+                    self.Qproj_acoustic = torch.nn.Linear(encoder_out, self.attn_dim*self.gnnheads)
+                    self.pointer_gate = torch.nn.Linear(self.attn_dim+args.joint_dim, 1)
+                else:
+                    self.Qproj_char = torch.nn.Linear(args.dec_embed_dim, self.attn_dim)
+                    self.Qproj_acoustic = torch.nn.Linear(encoder_out, self.attn_dim)
+                    if self.jknet:
+                        self.ooKBemb = torch.nn.Embedding(1, self.tree_hid * self.gnnheads)
+                        self.stitchproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
+                    else:
+                        self.ooKBemb = torch.nn.Embedding(1, self.tree_hid)
+                    self.Kproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
+                    self.pointer_gate = torch.nn.Linear(self.attn_dim+args.joint_dim, 1)
 
         self.joint_network = JointNetwork(
             odim, encoder_out, decoder_out, args.joint_dim, args.joint_activation_type,
@@ -507,7 +552,7 @@ class E2E(ASRInterface, torch.nn.Module):
             hs_pad, aux_hs_pad = _hs_pad, None
         return hs_pad, aux_hs_pad, hs_mask
 
-    def forward(self, xs_pad, ilens, ys_pad, meetings=None):
+    def forward(self, xs_pad, ilens, ys_pad, meetings=None, orig_text=None, intents=None, slots=None):
         """E2E forward.
 
         Args:
@@ -546,7 +591,18 @@ class E2E(ASRInterface, torch.nn.Module):
             ys_ptrgen_pad = torch.cat([ys_in_pad[:, 0:1], ys_pad], dim=-1)
 
             # get tree net encodings
-            self.encode_tree(meeting_info[2][0])
+            if self.treetype.startswith('gcn'):
+                self.gcn(meeting_info[2][0], self.dec.embed)
+            elif self.treetype.startswith('sage'):
+                self.sage(meeting_info[2][0], self.dec.embed)
+            elif self.treetype.startswith('appnp'):
+                self.appnp(meeting_info[2][0], self.dec.embed)
+            elif self.treetype.startswith('iigcn'):
+                self.gcnii(meeting_info[2][0], self.dec.embed)
+            elif self.treetype.startswith('comb'):
+                self.combined(meeting_info[2][0], self.dec.embed)
+            else:
+                self.get_lextree_encs(meeting_info[2][0])
             trees = meeting_info[2]
             p_gen_mask_all = []
 
@@ -760,13 +816,21 @@ class E2E(ASRInterface, torch.nn.Module):
         if lextree[1] != -1 and wordpiece is not None:
             ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
             ey = self.dropout_KB(ey)
-            lextree.append(ey)
-            return ey
+            wordpiece_h = ey.new_zeros(1, self.tree_hid)
+            wordpiece_h = self.recursive_proj(torch.cat([ey, wordpiece_h], dim=-1))
+            lextree.append(wordpiece_h)
+            return wordpiece_h
         elif lextree[1] == -1:
             wordpieces = []
             for newpiece, values in lextree[0].items():
                 wordpieces.append(self.get_lextree_encs(values, newpiece))
-            wordpiece_h = torch.cat(wordpieces, dim=0).sum(dim=0).unsqueeze(0)
+            wordpiece_h = torch.cat(wordpieces, dim=0)
+            if self.treetype.endswith('mean'):
+                wordpiece_h = wordpiece_h.mean(dim=0).unsqueeze(0)
+            elif self.treetype.endswith('max'):
+                wordpiece_h = wordpiece_h.max(dim=0)[0].unsqueeze(0)
+            else:
+                wordpiece_h = wordpiece_h.sum(dim=0).unsqueeze(0)
             if wordpiece is not None:
                 ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
                 ey = self.dropout_KB(ey)
@@ -775,72 +839,6 @@ class E2E(ASRInterface, torch.nn.Module):
                 # wordpiece_h = torch.sigmoid(wordpiece_h)
                 lextree.append(wordpiece_h)
             return wordpiece_h
-
-    def get_lextree_encs_gcn(self, lextree, embeddings, adjacency, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = len(embeddings)
-            # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-            ey = self.dec.embed.weight[wordpiece].unsqueeze(0)
-            embeddings.append(self.dropout_KB(ey))
-            adjacency.append([idx])
-            lextree.append([])
-            lextree.append(idx)
-            return idx
-        elif lextree[1] == -1 and lextree[0] != {}:
-            ids = []
-            idx = len(embeddings)
-            if wordpiece is not None:
-                # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-                ey = self.dec.embed.weight[wordpiece].unsqueeze(0)
-                embeddings.append(self.dropout_KB(ey))
-            for newpiece, values in lextree[0].items():
-                ids.append(self.get_lextree_encs_gcn(values, embeddings, adjacency, newpiece))
-            if wordpiece is not None:
-                adjacency.append([idx] + ids)
-            lextree.append(ids)
-            lextree.append(idx)
-            return idx
-
-    def forward_gcn(self, lextree, embeddings, adjacency):
-        n_nodes = len(embeddings)
-        embeddings = torch.cat(embeddings, dim=0)
-        adjacency_mat = embeddings.new_zeros(n_nodes, n_nodes)
-        for node in adjacency:
-            for neighbour in node:
-                adjacency_mat[node[0], neighbour] = 1.0
-        degrees = torch.diag(torch.sum(adjacency_mat, dim=-1) ** -0.5)
-        nodes_encs = self.gcn_l1(embeddings)
-        adjacency_mat = torch.einsum('ij,jk->ik', degrees, adjacency_mat)
-        adjacency_mat = torch.einsum('ij,jk->ik', adjacency_mat, degrees)
-        nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        if self.treetype != 'gcn' and int(self.treetype[-1]) > 1:
-            nodes_encs = self.gcn_l2(nodes_encs)
-            nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-            if int(self.treetype[-1]) > 2:
-                nodes_encs = self.gcn_l3(nodes_encs)
-                nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        return nodes_encs
-
-    def fill_lextree_encs_gcn(self, lextree, nodes_encs, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = lextree[4]
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-        elif lextree[1] == -1 and lextree[0] != {}:
-            idx = lextree[4]
-            for newpiece, values in lextree[0].items():
-                self.fill_lextree_encs_gcn(values, nodes_encs, newpiece)
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-
-    def encode_tree(self, prefixtree):
-        if self.treetype.startswith('gcn'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            nodes_encs = self.forward_gcn(prefixtree, embeddings, adjacency)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
-        else:
-            self.get_lextree_encs(prefixtree)
 
     def get_meetingKB_emb_map(self, query, meeting_mask, meeting_embs, back_transform):
         """
@@ -851,15 +849,58 @@ class E2E(ASRInterface, torch.nn.Module):
 
         return: (nutts, T, nbpes)
         """
-        meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
-        KBweight = torch.einsum('ijk,itk->itj', meeting_KB, query)
-        KBweight = KBweight / math.sqrt(query.size(-1))
-        KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
-        KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
-        if meeting_embs.size(1) > 1:
-            KBembedding = torch.einsum('ijk,itj->itk', meeting_KB[:,:-1,:], KBweight[:,:,:-1])
+        nutts = meeting_embs.size(0)
+        n_nodes = meeting_embs.size(1)
+        T = query.size(1)
+        if self.gnnheads > 1 and not self.jknet:
+            meeting_KB = self.dropout_KB(self.Kproj(meeting_embs.view(nutts, n_nodes, self.gnnheads, self.tree_hid)))
+            # meeting_KB = self.dropout_KB(meeting_embs.view(nutts, n_nodes, self.gnnheads, self.tree_hid))
+            query = query.view(nutts, T, self.gnnheads, meeting_KB.size(-1))
+            meeting_mask = meeting_mask.bool().view(nutts, 1, n_nodes, 1)
+            KBweight = torch.einsum('ijnk,itnk->itjn', meeting_KB, query) / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask, -1e9)
+            KBweight = KBweight.contiguous() #.view(nutts, T, -1)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=2) #.view(nutts, T, n_nodes, -1)
+            if meeting_embs.size(1) > 1:
+                KBembedding = torch.einsum('ijnk,itjn->itnk', meeting_KB[:,:-1,:,:], KBweight[:,:,:-1,:])
+                # KBembedding = KBembedding.view(nutts, T, -1)
+                headweights = torch.tensor([0.0, 1.0]).to(KBembedding.device).unsqueeze(0).unsqueeze(0).repeat(nutts, T, 1)
+                # headweights = (KBembedding * query).sum(dim=-1) / math.sqrt(query.size(-1)) # itnk,itnk->itn
+                # headweights = torch.softmax(headweights, dim=-1)
+                KBweight = torch.einsum('itjn,itn->itj', KBweight, headweights)
+                KBembedding = torch.einsum('itnk,itn->itk', KBembedding, headweights)
+            else:
+                KBembedding = KBweight.new_zeros(nutts, T, meeting_KB.size(-1))
+                KBweight = KBweight.mean(dim=-1)
+        elif  self.jknet and self.gnnheads > 1:
+            meeting_embs = meeting_embs.view(nutts, n_nodes, self.gnnheads, self.tree_hid)
+            stitch_keys = self.stitchproj(meeting_embs)
+            stitch_weights = torch.einsum('itk,ijnk->itjn', query, stitch_keys) / math.sqrt(query.size(-1))
+            stitch_weights = torch.softmax(stitch_weights, dim=-1)
+            # stitch_weights = torch.tensor([0.8, 0.2]).to(
+            #     meeting_embs.device).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(nutts, T, n_nodes, 1)
+            meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
+            KBweight = torch.einsum('ijnk,itk->itjn', meeting_KB, query)
+            KBweight = (KBweight * stitch_weights).sum(dim=-1)
+            KBweight = KBweight / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+            if meeting_embs.size(1) > 1:
+                finegrained_weights = stitch_weights * KBweight.unsqueeze(-1)
+                KBembedding = torch.einsum(
+                    'ijnk,itjn->itk', meeting_KB[:,:-1,:,:], finegrained_weights[:,:,:-1,:])
+            else:
+                KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
         else:
-            KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
+            meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
+            KBweight = torch.einsum('ijk,itk->itj', meeting_KB, query)
+            KBweight = KBweight / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+            if meeting_embs.size(1) > 1:
+                KBembedding = torch.einsum('ijk,itj->itk', meeting_KB[:,:-1,:], KBweight[:,:,:-1])
+            else:
+                KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
         KBweight = torch.einsum('ijk,itj->itk', back_transform, KBweight)
         return KBembedding, KBweight
 
@@ -889,7 +930,7 @@ class E2E(ASRInterface, torch.nn.Module):
             if len(new_tree) > 2:
                 step_embs.append(torch.cat([node[3] for key, node in new_tree[0].items()], dim=0))
             else:
-                step_embs.append(to_device(self, torch.empty(0, self.tree_hid)))
+                step_embs.append(to_device(self, torch.empty(0, self.tree_hid * self.gnnheads)))
         maxlen += 1
         step_mask = []
         back_transform = to_device(self, torch.zeros(char_ids.size(0), maxlen, ooKB_id+1))

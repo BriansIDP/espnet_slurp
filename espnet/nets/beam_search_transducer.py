@@ -284,15 +284,58 @@ class BeamSearchTransducer:
 
         return: (nutts, T, nbpes)
         """
-        meeting_KB = self.Kproj(meeting_embs)
-        KBweight = torch.einsum('ijk,itk->itj', meeting_KB, query)
-        KBweight = KBweight / math.sqrt(query.size(-1))
-        KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
-        KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
-        if meeting_embs.size(1) > 1:
-            KBembedding = torch.einsum('ijk,itj->itk', meeting_KB[:,:-1,:], KBweight[:,:,:-1])
+        nutts = meeting_embs.size(0)
+        n_nodes = meeting_embs.size(1)
+        T = query.size(1)
+        if self.gnnheads > 1 and not self.jknet:
+            # meeting_KB = meeting_embs.view(nutts, n_nodes, self.gnnheads, self.tree_hid)
+            meeting_KB = self.Kproj(meeting_embs.view(nutts, n_nodes, self.gnnheads, -1))
+            query = query.view(nutts, T, self.gnnheads, -1)
+            meeting_mask = meeting_mask.bool().view(nutts, 1, n_nodes, 1)
+            KBweight = torch.einsum('ijnk,itnk->itjn', meeting_KB, query) / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask, -1e9)
+            KBweight = KBweight.contiguous() #.view(nutts, T, -1)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=2) #.view(nutts, T, n_nodes, -1)
+            if meeting_embs.size(1) > 1:
+                KBembedding = torch.einsum('ijnk,itjn->itnk', meeting_KB[:,:-1,:,:], KBweight[:,:,:-1,:])
+                # KBembedding = KBembedding.view(nutts, T, -1)
+                headweights = torch.tensor([0.8, 0.2]).to(KBembedding.device).unsqueeze(0).unsqueeze(0).repeat(nutts, T, 1)
+                # headweights = (KBembedding * query).sum(dim=-1) / math.sqrt(query.size(-1)) # itnk,itnk->itn
+                # headweights = torch.softmax(headweights, dim=-1)
+                KBweight = torch.einsum('itjn,itn->itj', KBweight, headweights)
+                KBembedding = torch.einsum('itnk,itn->itk', KBembedding, headweights)
+            else:
+                KBembedding = KBweight.new_zeros(nutts, T, meeting_KB.size(-1))
+                KBweight = KBweight.mean(dim=-1)
+        elif  self.jknet and self.gnnheads > 1:
+            meeting_embs = meeting_embs.view(nutts, n_nodes, self.gnnheads, self.tree_hid)
+            # stitch_keys = self.stitchproj(meeting_embs)
+            # stitch_weights = torch.einsum('itk,ijnk->itjn', query, stitch_keys) / math.sqrt(query.size(-1))
+            # stitch_weights = torch.softmax(stitch_weights, dim=-1)
+            stitch_weights = torch.tensor([0.8, 0.2]).to(
+                meeting_embs.device).unsqueeze(0).unsqueeze(0).unsqueeze(0).repeat(nutts, T, n_nodes, 1)
+            meeting_KB = self.Kproj(meeting_embs)
+            KBweight = torch.einsum('ijnk,itk->itjn', meeting_KB, query)
+            KBweight = (KBweight * stitch_weights).sum(dim=-1)
+            KBweight = KBweight / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+            if meeting_embs.size(1) > 1:
+                finegrained_weights = stitch_weights * KBweight.unsqueeze(-1)
+                KBembedding = torch.einsum(
+                    'ijnk,itjn->itk', meeting_KB[:,:-1,:,:], finegrained_weights[:,:,:-1,:])
+            else:
+                KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
         else:
-            KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
+            meeting_KB = self.Kproj(meeting_embs)
+            KBweight = torch.einsum('ijk,itk->itj', meeting_KB, query)
+            KBweight = KBweight / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask.bool().unsqueeze(1).repeat(1, query.size(1), 1), -1e9)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+            if meeting_embs.size(1) > 1:
+                KBembedding = torch.einsum('ijk,itj->itk', meeting_KB[:,:-1,:], KBweight[:,:,:-1])
+            else:
+                KBembedding = KBweight.new_zeros(meeting_KB.size(0), query.size(1), meeting_KB.size(-1))
         KBweight = torch.einsum('ijk,itj->itk', back_transform, KBweight)
         return KBembedding, KBweight
 
@@ -312,7 +355,7 @@ class BeamSearchTransducer:
         if len(new_tree) > 2 and new_tree[0] != {}:
             step_embs = torch.cat([node[3] for key, node in new_tree[0].items()], dim=0)
         else:
-            step_embs = torch.empty(0, self.tree_hid)
+            step_embs = torch.empty(0, self.tree_hid * self.gnnheads)
         back_transform = []
         indices = list(new_tree[0].keys()) + [ooKB_id]
         for i, ind in enumerate(indices):
@@ -334,7 +377,13 @@ class BeamSearchTransducer:
             wordpieces = []
             for newpiece, values in lextree[0].items():
                 wordpieces.append(self.get_lextree_encs(values, newpiece))
-            wordpiece_h = torch.cat(wordpieces, dim=0).sum(dim=0).unsqueeze(0)
+            wordpiece_h = torch.cat(wordpieces, dim=0)
+            if self.treetype.endswith('mean'):
+                wordpiece_h = wordpiece_h.mean(dim=0).unsqueeze(0)
+            elif self.treetype.endswith('max'):
+                wordpiece_h = wordpiece_h.max(dim=0)[0].unsqueeze(0)
+            else:
+                wordpiece_h = wordpiece_h.sum(dim=0).unsqueeze(0)
             if wordpiece is not None:
                 ey = self.decoder.embed(torch.LongTensor([wordpiece]))
                 wordpiece_h = self.recursive_proj(torch.cat([ey, wordpiece_h], dim=-1))
@@ -342,73 +391,6 @@ class BeamSearchTransducer:
                 # wordpiece_h = torch.sigmoid(wordpiece_h)
                 lextree.append(wordpiece_h)
             return wordpiece_h
-
-    def get_lextree_encs_gcn(self, lextree, embeddings, adjacency, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = len(embeddings)
-            # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-            ey = self.decoder.embed.weight[wordpiece].unsqueeze(0)
-            embeddings.append(ey)
-            adjacency.append([idx])
-            lextree.append([])
-            lextree.append(idx)
-            return idx
-        elif lextree[1] == -1 and lextree[0] != {}:
-            ids = []
-            idx = len(embeddings)
-            if wordpiece is not None:
-                # ey = self.dec.embed(to_device(self, torch.LongTensor([wordpiece])))
-                ey = self.decoder.embed.weight[wordpiece].unsqueeze(0)
-                embeddings.append(ey)
-            for newpiece, values in lextree[0].items():
-                ids.append(self.get_lextree_encs_gcn(values, embeddings, adjacency, newpiece))
-            if wordpiece is not None:
-                adjacency.append([idx] + ids)
-                lextree.append([])
-                lextree.append(idx)
-            return idx
-
-    def forward_gcn(self, lextree, embeddings, adjacency):
-        n_nodes = len(embeddings)
-        embeddings = torch.cat(embeddings, dim=0)
-        adjacency_mat = embeddings.new_zeros(n_nodes, n_nodes)
-        for node in adjacency:
-            for neighbour in node:
-                adjacency_mat[node[0], neighbour] = 1.0
-        degrees = torch.diag(torch.sum(adjacency_mat, dim=-1) ** -0.5)
-        nodes_encs = self.gcn_l1(embeddings)
-        adjacency_mat = torch.einsum('ij,jk->ik', degrees, adjacency_mat)
-        adjacency_mat = torch.einsum('ij,jk->ik', adjacency_mat, degrees)
-        nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        if self.treetype != 'gcn' and int(self.treetype[-1]) > 1:
-            nodes_encs = self.gcn_l2(nodes_encs)
-            nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-            if int(self.treetype[-1]) > 2:
-                nodes_encs = self.gcn_l3(nodes_encs)
-                nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        return nodes_encs
-
-    def fill_lextree_encs_gcn(self, lextree, nodes_encs, wordpiece=None):
-        if lextree[1] != -1 and wordpiece is not None:
-            idx = lextree[4]
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-        elif lextree[1] == -1 and lextree[0] != {}:
-            for newpiece, values in lextree[0].items():
-                self.fill_lextree_encs_gcn(values, nodes_encs, newpiece)
-            if wordpiece is not None:
-                idx = lextree[4]
-                # lextree.append(nodes_encs[idx])
-                lextree[3] = nodes_encs[idx].unsqueeze(0)
-
-    def encode_tree(self, prefixtree):
-        if self.treetype.startswith('gcn'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            nodes_encs = self.forward_gcn(prefixtree, embeddings, adjacency)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
-        else:
-            self.get_lextree_encs(prefixtree)
 
     def get_last_word(self, charlist, split=False):
         starts = len(charlist) - 2
@@ -879,7 +861,18 @@ class BeamSearchTransducer:
             if self.sel_lm is not None:
                 init_hid = self.sel_lm.init_hidden(1) if prev_hid is None else prev_hid
             else:
-                self.encode_tree(init_lextree)
+                if self.treetype.startswith('gcn'):
+                    self.gcn(init_lextree, self.decoder.embed)
+                elif self.treetype.startswith('sage'):
+                    self.sage(init_lextree, self.decoder.embed)
+                elif self.treetype.startswith('appnp'):
+                    self.appnp(init_lextree, self.decoder.embed)
+                elif self.treetype.startswith('iigcn'):
+                    self.gcnii(init_lextree, self.decoder.embed)
+                elif self.treetype.startswith('comb'):
+                    self.combined(init_lextree, self.decoder.embed)
+                else:
+                    self.get_lextree_encs(init_lextree)
 
         estlm_state = None
         if estlm is not None:
@@ -920,7 +913,7 @@ class BeamSearchTransducer:
                         new_lm_output = lmout[meeting_info[0][0]]
                         values, new_select = torch.topk(new_lm_output, self.topk, dim=0)
                         reset_lextree = self.meeting_KB.get_tree_from_inds(new_select, extra=meeting_info[1])
-                        self.encode_tree(reset_lextree)
+                        self.get_lextree_encs(reset_lextree)
                     else:
                         meeting = meeting_info[2][0]
                         reset_lextree = self.meeting_KB.meetinglextree[meeting] if isinstance(meeting, str) else init_lextree

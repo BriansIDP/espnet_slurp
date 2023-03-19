@@ -26,6 +26,7 @@ from espnet.nets.scorer_interface import ScorerInterface
 from espnet.nets.pytorch_backend.lm.model_debug import RNNModel
 # from torch_geometric.nn.conv.gatv2_conv import GATv2Conv
 from espnet.nets.pytorch_backend.GAT import GAT
+from espnet.nets.pytorch_backend.KB_utils.GNN import GCN, GSage, SageMean, APPNP, GCNII, GCNSage
 
 MAX_DECODER_OUTPUT = 5
 CTC_SCORING_RATIO = 1.5
@@ -74,7 +75,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         wordemb=0, lm_odim=1, meetingKB=None, KBlextree=False, PtrGen=False,
         PtrSche=0, PtrKBin=False, smoothprob=1.0, attn_dim=0, acousticonly=True,
         additive=False, ooKBemb=False, DBmask=0.0, DBinput=False, treetype='',
-        tree_hid=0, boostfactor=0, stacked=False
+        tree_hid=0, boostfactor=0, residual=True, gnntie=False, gnnheads=1,
     ):
 
         torch.nn.Module.__init__(self)
@@ -91,50 +92,62 @@ class Decoder(torch.nn.Module, ScorerInterface):
         self.bpeunk = char_list.index('<unk>') if '<unk>' in char_list else -1
         self.wordemb = wordemb
         self.ac_only = acousticonly
-        self.useKBinput = False
         self.attn_dim = attn_dim if attn_dim != 0 else self.dunits
         self.additive = additive
         # self.ooKBemb = torch.nn.Embedding(1, dunits)
         embdim = 0
         self.useKBinput = (meetingKB is not None) and (not PtrGen or PtrKBin)
         if meetingKB is not None:
-            # Define graph neural net parameters
-            self.tree_hid = self.dunits if tree_hid == 0 else tree_hid
-            if treetype == 'lstm':
-                self.input_gate = torch.nn.Linear(self.dunits+self.tree_hid, self.tree_hid)
-                self.forget_gate = torch.nn.Linear(self.dunits+self.tree_hid, self.tree_hid)
-                self.output_gate = torch.nn.Linear(self.dunits+self.tree_hid, self.tree_hid)
-                self.transform_gate = torch.nn.Linear(self.dunits+self.tree_hid, self.tree_hid)
-            elif treetype.startswith('gcn'):
-                self.gcn_l1 = torch.nn.Linear(self.dunits, self.tree_hid)
-                self.gcn_l2 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-            elif treetype.startswith('gat'):
-                self.nheads = [int(head) for head in treetype.split('_')[1:]]
-                self.GAT = GAT(num_of_layers=len(self.nheads), num_heads_per_layer=self.nheads,
-                               num_features_per_layer=[self.dunits]+[self.tree_hid]*len(self.nheads),
-                               boost_self=boostfactor)
-            elif treetype.startswith('sage'):
-                self.sage_pool_1 = torch.nn.Linear(self.dunits, self.tree_hid)
-                self.sage_merge_1 = torch.nn.Linear(self.dunits + self.tree_hid, self.tree_hid)
-                self.sage_pool_2 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-                self.sage_merge_2 = torch.nn.Linear(self.tree_hid + self.tree_hid, self.tree_hid)
-                self.sage_pool_3 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-                self.sage_merge_3 = torch.nn.Linear(self.tree_hid + self.tree_hid, self.tree_hid)
-                self.sage_pool_4 = torch.nn.Linear(self.tree_hid, self.tree_hid)
-                self.sage_merge_4 = torch.nn.Linear(self.tree_hid + self.tree_hid, self.tree_hid)
+            ### Define graph neural net parameters
+            self.treetype = treetype
+            if self.treetype.startswith('jknet'):
+                self.treetype = self.treetype[5:]
+                self.jknet = True
             else:
-                self.tree_hid = self.dunits
+                self.jknet = False
+            self.residual = residual
+            self.gnntie = gnntie
+            self.gnnheads = gnnheads
+            self.tree_hid = self.dunits if tree_hid == 0 else tree_hid
+            if self.treetype.startswith('gcn'):
+                self.gcn = GCN(self.dunits, self.tree_hid, int(self.treetype[3:]),
+                               dropout, residual=self.residual,
+                               tied=self.gnntie, nhead=self.gnnheads)
+            elif self.treetype.startswith('sage'):
+                if 'mean' in self.treetype:
+                    self.sage = SageMean(self.dunits, self.tree_hid, int(self.treetype[8:]),
+                                         dropout, residual=self.residual)
+                else:
+                    self.sage = GSage(self.dunits, self.tree_hid, int(self.treetype[4:]),
+                                      dropout, residual=self.residual,
+                                      nhead=self.gnnheads, tied=self.gnntie)
+            elif self.treetype.startswith('appnp'):
+                gnnlayers = int(self.treetype[8:]) if self.treetype.startswith('appnpmax') else int(self.treetype[5:])
+                maxpool = self.treetype.startswith('appnpmax')
+                self.appnp = APPNP(self.dunits, self.tree_hid, gnnlayers,
+                                   dropout, residual=self.residual,
+                                   maxpool=maxpool)
+            elif self.treetype.startswith('iigcn'):
+                self.gcnii = GCNII(self.dunits, self.tree_hid, int(self.treetype[5:]),
+                                   dropout, residual=self.residual,
+                                   tied=self.gnntie, nhead=self.gnnheads)
+            elif self.treetype.startswith('comb'):
+                self.combined = GCNSage(self.dunits, self.tree_hid, int(self.treetype[4:]),
+                                        dropout, residual=self.residual,
+                                        tied=self.gnntie, nhead=self.gnnheads//2, bilinear=True,
+                                        attn_dim=self.attn_dim)
+            else:
                 self.recursive_proj = torch.nn.Linear(self.dunits+self.tree_hid, self.tree_hid)
             # Define TCPGen parameters
             self.Qproj = torch.nn.Linear(self.dunits+eprojs, self.attn_dim)
-            self.Kproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
-            self.Qprojclass = torch.nn.Linear(self.attn_dim, self.attn_dim)
-            self.Kprojclass = torch.nn.Linear(self.attn_dim, self.attn_dim)
-            if self.additive:
-                self.AttnProj_1 = torch.nn.Linear(self.attn_dim*2, self.attn_dim*2)
-                self.AttnProj_2 = torch.nn.Linear(self.attn_dim*2, 1)
+            if self.jknet:
+                self.tree_hid = self.attn_dim
+                self.ooKBemb = torch.nn.Embedding(1, self.tree_hid * self.gnnheads)
+                self.stitchproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
+            else:
+                self.ooKBemb = torch.nn.Embedding(1, self.tree_hid)
+                self.Kproj = torch.nn.Linear(self.tree_hid, self.attn_dim)
             self.pointer_gate = torch.nn.Linear(self.attn_dim+self.dunits if self.ac_only else self.attn_dim*2, 1)
-            self.ooKBemb = torch.nn.Embedding(1, self.tree_hid)
             embdim = self.attn_dim
         self.KBlextree = KBlextree
         self.PtrGen = PtrGen
@@ -142,8 +155,6 @@ class Decoder(torch.nn.Module, ScorerInterface):
         self.PtrSche = PtrSche
         self.smoothprob = smoothprob
         self.DBmask = DBmask
-        self.treetype = treetype
-        self.stacked = stacked
         # Using deep biasing
         self.DBinput = DBinput
         if meetingKB is not None and DBinput:
@@ -217,45 +228,83 @@ class Decoder(torch.nn.Module, ScorerInterface):
         return z_list, c_list
 
     def get_meetingKB_emb_map(self, query, meeting_mask, meeting_embs, back_transform):
+        nutts = meeting_embs.size(0)
+        n_nodes = meeting_embs.size(1)
+        T = query.size(1)
+        if self.gnnheads > 1 and not self.jknet:
+            meeting_KB = self.dropout_KB(meeting_embs).view(nutts, n_nodes, self.gnnheads, self.tree_hid)
+            query = query.view(nutts, T, self.gnnheads, self.tree_hid)
+            meeting_mask = meeting_mask.byte().view(nutts, 1, n_nodes, 1)
+            KBweight = torch.einsum('ijnk,itnk->itjn', meeting_KB, query) / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask, -1e9)
+            KBweight = KBweight.contiguous() #.view(nutts, T, -1)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=2) #.view(nutts, T, n_nodes, -1)
+            if meeting_embs.size(1) > 1:
+                KBembedding = torch.einsum('ijnk,itjn->itnk', meeting_KB[:,:-1,:,:], KBweight[:,:,:-1,:])
+                # KBembedding = KBembedding.view(nutts, T, -1)
+                # headweights = torch.tensor([0.2, 0.8]).to(KBembedding.device).unsqueeze(0).unsqueeze(0).repeat(nutts, T, 1)
+                headweights = (KBembedding * query).sum(dim=-1) / math.sqrt(query.size(-1)) # itnk,itnk->itn
+                headweights = torch.softmax(headweights, dim=-1)
+                KBweight = torch.einsum('itjn,itn->itj', KBweight, headweights)
+                KBembedding = torch.einsum('itnk,itn->itk', KBembedding, headweights)
+            else:
+                KBembedding = KBweight.new_zeros(nutts, T, self.tree_hid)
+                KBweight = KBweight.mean(dim=-1)
+        elif  self.jknet and self.gnnheads > 1:
+            meeting_embs = meeting_embs.view(nutts, n_nodes, self.gnnheads, self.tree_hid)
+            # stitch_keys = self.stitchproj(meeting_embs)
+            # stitch_weights = torch.einsum('ik,ijnk->ijn', query, stitch_keys) / math.sqrt(query.size(-1))
+            # stitch_weights = torch.softmax(stitch_weights, dim=-1)
+            stitch_weights =  torch.tensor([0.8, 0.2]).to(
+                meeting_embs.device).unsqueeze(0).unsqueeze(0).repeat(nutts, n_nodes, 1)
+
+            # meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
+            meeting_KB = self.dropout_KB(meeting_embs)
+            KBweight = torch.einsum('ijnk,ik->ijn', meeting_KB, query)
+            KBweight = (KBweight * stitch_weights).sum(dim=-1)
+            KBweight = KBweight / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask.byte(), -1e9)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+            if meeting_embs.size(1) > 1:
+                finegrained_weights = stitch_weights * KBweight.unsqueeze(-1)
+                KBembedding = torch.einsum(
+                    'ijnk,ijn->ik', meeting_KB[:,:-1,:,:], finegrained_weights[:,:-1,:])
+            else:
+                KBembedding = KBweight.new_zeros(meeting_KB.size(0), meeting_KB.size(-1))
+        else:
+            if self.jknet:
+                meeting_KB = self.dropout_KB(meeting_embs)
+            else:
+                meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
+            KBweight = torch.einsum('ijk,ik->ij', meeting_KB, query)
+            KBweight = KBweight / math.sqrt(query.size(-1))
+            KBweight.masked_fill_(meeting_mask.byte(), -1e9)
+            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+            if meeting_embs.size(1) > 1:
+                KBembedding = torch.einsum('ijk,ij->ik', meeting_KB[:,:-1,:], KBweight[:,:-1])
+            else:
+                KBembedding = KBweight.new_zeros(meeting_KB.size(0), meeting_KB.size(-1))
+        KBweight = torch.einsum('ijk,ij->ik', back_transform, KBweight)
+        return KBembedding, KBweight
+
+    def get_meetingKB_emb_map_forest(self, query, meeting_mask, meeting_embs, back_transform,
+                                     class_mask=None):
         meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
-        KBweight = torch.einsum('ijk,ik->ij', meeting_KB, query)
+        KBweight = torch.einsum('ijk,k->ij', meeting_KB, query.squeeze(0))
         KBweight = KBweight / math.sqrt(query.size(-1))
-        KBweight.masked_fill_(meeting_mask.bool(), -1e9)
+        KBweight.masked_fill_(meeting_mask.byte(), -1e9)
+        # option: only have one ooKB logit, and mask other logits
+        KBweight[1:,-1] = -1e9
+        KBweight = KBweight.view(1, -1)
         KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
+        KBweight = KBweight.view(meeting_KB.size(0), -1)
+        classpost = KBweight[:,:-1].sum(dim=-1)
+        classpost = classpost / max(1e-9, classpost.sum())
         if meeting_embs.size(1) > 1:
             KBembedding = torch.einsum('ijk,ij->ik', meeting_KB[:,:-1,:], KBweight[:,:-1])
         else:
             KBembedding = KBweight.new_zeros(meeting_KB.size(0), meeting_KB.size(-1))
-        KBweight = torch.einsum('ijk,ij->ik', back_transform, KBweight)
-        return KBembedding, KBweight
-
-    def get_meetingKB_emb_map_forest(self, query, meeting_mask, meeting_embs, back_transform, stacked=False):
-        meeting_KB = self.dropout_KB(self.Kproj(meeting_embs))
-        KBweight = torch.einsum('ijk,k->ij', meeting_KB, query.squeeze(0))
-        KBweight = KBweight / math.sqrt(query.size(-1))
-        KBweight.masked_fill_(meeting_mask.bool(), -1e9)
-        # option: only have one ooKB logit, and mask other logits
-        if stacked:
-            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
-            KBclassemb = torch.einsum('ijk,ij->ik', meeting_KB[:,:-1,:], KBweight[:,:-1])
-            KBclassemb = self.dropout_KB(self.Kprojclass(KBclassemb))
-            KBclassquery = self.dropout_KB(self.Qprojclass(query))
-            KBweightclass = torch.einsum('ik,k->i', KBclassemb, KBclassquery) / math.sqrt(KBclassquery.size(-1))
-            KBweightclass = torch.softmax(KBweightclass, dim=-1)
-            KBembedding = torch.einsum('i,ik->k', KBweightclass, KBclassemb).unsqueeze(0)
-            classpost = KBweightclass
-            KBweight = KBweightclass.unsqueeze(1) * KBweight
-        else:
-            KBweight[1:,-1] = -1e9
-            KBweight = KBweight.view(1, -1)
-            KBweight = torch.nn.functional.softmax(KBweight, dim=-1)
-            KBweight = KBweight.view(meeting_KB.size(0), -1)
-            if meeting_embs.size(1) > 1:
-                KBembedding = torch.einsum('ijk,ij->ik', meeting_KB[:,:-1,:], KBweight[:,:-1])
-                KBembedding = KBembedding.sum(dim=0, keepdim=True)
-            else:
-                KBembedding = KBweight.new_zeros(1, meeting_KB.size(-1))
-            classpost = KBweight[:,:-1].sum(dim=1)
+        KBembedding = KBembedding.sum(dim=0, keepdim=True)
         KBweight = torch.einsum('ijk,ij->ik', back_transform, KBweight).sum(dim=0, keepdim=True)
         return KBembedding, KBweight, classpost
 
@@ -276,7 +325,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
         if len(new_tree) > 2 and new_tree[0] != {}:
             step_embs = torch.cat([new_tree[0][key][3] for key in indices], dim=0)
         else:
-            step_embs = torch.empty(0, self.tree_hid)
+            step_embs = torch.empty(0, self.tree_hid * self.gnnheads)
         back_transform = []
         indices += [ooKB_id] # list(new_tree[0].keys()) + [ooKB_id]
         for i, ind in enumerate(indices):
@@ -301,8 +350,14 @@ class Decoder(torch.nn.Module, ScorerInterface):
         for i, vy in enumerate(char_ids):
             new_tree = trees[i][0]
             vy = vy.item()
-            if vy in [self.eos] or (self.char_list[vy].endswith('▁') and not clm):
+            if vy in [self.eos]:
                 new_tree = origTries[i]
+                p_gen_mask.append(0)
+            elif self.char_list[vy].endswith('▁') and not clm:
+                if vy in new_tree and new_tree[vy][0] != {}:
+                    new_tree = new_tree[vy]
+                else:
+                    new_tree = origTries[i]
                 p_gen_mask.append(0)
             elif vy not in new_tree:
                 new_tree = [{}]
@@ -321,7 +376,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 # step_embs.append(torch.cat([node[3] for key, node in new_tree[0].items()], dim=0))
                 step_embs.append(torch.cat([new_tree[0][key][3] for key in index_list[-1]]))
             else:
-                step_embs.append(to_device(self, torch.empty(0, self.tree_hid)))
+                step_embs.append(to_device(self, torch.empty(0, self.tree_hid * self.gnnheads)))
 
         # reset for clm entities
         if clm and self.char_list[char_ids[0]].endswith('▁') and 0 not in p_gen_mask:
@@ -333,15 +388,12 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 if len(new_tree[0].keys()) > maxlen:
                     maxlen = len(new_tree[0].keys())
                 index_list.append(list(new_tree[0].keys()))
-                if len(new_tree) > 2 and new_tree[0] != {}:
-                    step_embs.append(torch.cat([new_tree[0][key][3] for key in index_list[-1]]))
-                else:
-                    step_embs.append(to_device(self, torch.empty(0, self.tree_hid)))
-            p_gen_mask = [0] * len(p_gen_mask)
+                step_embs.append(torch.cat([new_tree[0][key][3] for key in index_list[-1]]))
+            p_gen_mask = [0] * len(new_trees)
 
         maxlen += 1
         step_mask = []
-        back_transform = to_device(self, torch.zeros(char_ids.size(0), maxlen, ooKB_id+1))
+        back_transform = to_device(self, torch.zeros(len(new_trees), maxlen, ooKB_id+1))
         ones_mat = to_device(self, torch.ones(back_transform.size()))
         for i, indices in enumerate(index_list):
             step_mask.append(len(indices) * [0] + (maxlen - len(indices) - 1) * [1] + [0])
@@ -418,105 +470,6 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 lextree.append(wordpiece_h)
             return wordpiece_h
 
-    def get_lextree_encs_gcn(self, lextree, embeddings, adjacency, wordpiece=None):
-        if lextree[0] == {} and wordpiece is not None:
-            idx = len(embeddings)
-            # ey = self.embed(to_device(self, torch.LongTensor([wordpiece])))
-            ey = self.embed.weight[wordpiece].unsqueeze(0)
-            embeddings.append(self.dropout_KB(ey))
-            adjacency.append([idx])
-            lextree.append([])
-            lextree.append(idx)
-            return idx
-        elif lextree[0] != {}:
-            ids = []
-            idx = len(embeddings)
-            if wordpiece is not None:
-                # ey = self.embed(to_device(self, torch.LongTensor([wordpiece])))
-                ey = self.embed.weight[wordpiece].unsqueeze(0)
-                embeddings.append(self.dropout_KB(ey))
-            for newpiece, values in lextree[0].items():
-                ids.append(self.get_lextree_encs_gcn(values, embeddings, adjacency, newpiece))
-            if wordpiece is not None:
-                adjacency.append([idx] + ids)
-            lextree.append(ids)
-            lextree.append(idx)
-            return idx
-
-    def get_adjacency_mat(self, embeddings, adjacency):
-        n_nodes = len(embeddings)
-        embeddings = torch.cat(embeddings, dim=0)
-        adjacency_mat = embeddings.new_zeros(n_nodes, n_nodes)
-        for node in adjacency:
-            for neighbour in node:
-                adjacency_mat[node[0], neighbour] = 1.0
-        return embeddings, adjacency_mat
-
-    def get_edge_ids(self, embeddings, adjacency):
-        edge_ids = []
-        embeddings = torch.cat(embeddings, dim=0)
-        for node in adjacency:
-            for neighbour in node:
-                edge_ids.append([node[0], neighbour])
-        return embeddings, to_device(self, torch.LongTensor(edge_ids)).t()
-
-    def forward_gcn(self, lextree, embeddings, adjacency):
-        # embeddings, adjacency_mat = self.get_adjacency_mat(embeddings, adjacency)
-        n_nodes = len(embeddings)
-        embeddings = torch.cat(embeddings, dim=0)
-        adjacency_mat = embeddings.new_zeros(n_nodes, n_nodes)
-        for node in adjacency:
-            for neighbour in node:
-                adjacency_mat[node[0], neighbour] = 1.0
-        # adjacency_mat = to_device(self, torch.Tensor(adjacency_mat))
-        degrees = torch.diag(torch.sum(adjacency_mat, dim=-1) ** -0.5)
-        nodes_encs = self.gcn_l1(embeddings)
-        adjacency_mat = torch.einsum('ij,jk->ik', degrees, adjacency_mat)
-        adjacency_mat = torch.einsum('ij,jk->ik', adjacency_mat, degrees)
-        nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        if self.treetype != 'gcn' and int(self.treetype[-1]) > 1:
-            nodes_encs = self.gcn_l2(nodes_encs)
-            nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-            if int(self.treetype[-1]) > 2:
-                nodes_encs = self.gcn_l3(nodes_encs)
-                nodes_encs = torch.relu(torch.einsum('ij,jk->ik', adjacency_mat, nodes_encs))
-        return nodes_encs
-
-    def forward_sage(self, lextree, embeddings, adjacency, layerid=1):
-        # adjacency = adjacency - torch.eye(adjacency.size(0)).to(adjacency.device)
-        nodes_encs = torch.relu(getattr(self, 'sage_pool_{}'.format(layerid))(embeddings))
-        # nodes_encs = embeddings
-        # nodes_encs = torch.cat([torch.ones_like(nodes_encs[:1])*-1e9, nodes_encs], dim=0)
-        # index = torch.arange(1, adjacency.size(1) + 1).to(adjacency.device) * adjacency.long()
-        # indexed = nodes_encs[index.flatten(), :].reshape(*adjacency.shape, nodes_encs.size(-1))
-        # pooled_encs = indexed.max(dim=1)[0]
-        # pooled_encs = pooled_encs * (adjacency.sum(dim=1, keepdim=True) != 0).float()
-
-        pooled_encs = [0] * len(adjacency)
-        for i, node in enumerate(adjacency):
-            if len(node) > 1:
-                candidates = nodes_encs[node[1:]]
-                pooled_encs[node[0]] = candidates.max(dim=0)[0]
-            elif len(node) == 1:
-                pooled_encs[node[0]] = nodes_encs.new_zeros(nodes_encs.size(1))
-        pooled_encs = torch.stack(pooled_encs)
-
-        pooled_encs = torch.cat([embeddings, pooled_encs], dim=1)
-        pooled_encs = torch.relu(getattr(self, 'sage_merge_{}'.format(layerid))(pooled_encs))
-        return pooled_encs
-
-    def fill_lextree_encs_gcn(self, lextree, nodes_encs, wordpiece=None):
-        if lextree[0] == {} and wordpiece is not None:
-            idx = lextree[4]
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-        elif lextree[0] != {}:
-            idx = lextree[4]
-            for newpiece, values in lextree[0].items():
-                self.fill_lextree_encs_gcn(values, nodes_encs, newpiece)
-            # lextree.append(nodes_encs[idx])
-            lextree[3] = nodes_encs[idx].unsqueeze(0)
-
     def calc_ptr_loss(self, ptr_dist_all, model_dist, ptr_gen, ptr_gen_mask,
                       targets, ignore_idx, reduction_str, att_labs=None):
         ptr_dist = torch.cat(ptr_dist_all, dim=1)
@@ -524,41 +477,29 @@ class Decoder(torch.nn.Module, ScorerInterface):
         att_lab_loss = None
         if att_labs is not None:
             att_lab_loss = (-torch.log(ptr_dist+1e-9) * att_labs).sum() # / max(att_labs.sum(), 1.0)
-        ptr_gen = torch.cat(ptr_gen, dim=1).masked_fill_(ptr_gen_mask.bool(), 0).view(-1, 1)
+        ptr_gen = torch.cat(ptr_gen, dim=1).masked_fill_(ptr_gen_mask.byte(), 0).view(-1, 1)
         # the gap to 1 is the prob for <unk>, which indicates not in the KB
         ptr_gen_complement = (ptr_dist[:,:,-1].view(targets.size(0), -1)) * ptr_gen
         model_dist = F.softmax(model_dist, dim=-1)
         p_final = ptr_dist[:,:,:-1].view(targets.size(0), -1) * ptr_gen + model_dist * (1 - ptr_gen + ptr_gen_complement)
         p_loss = F.nll_loss(torch.log(p_final+1e-9), targets,
                             ignore_index=ignore_idx, reduction=reduction_str)
+        ptr_gen = ptr_gen - ptr_gen_complement
         return p_loss, att_lab_loss, p_final, ptr_gen.view(ptr_gen_mask.size(0), -1)
 
     def encode_tree(self, prefixtree):
         if self.treetype == 'lstm':
             self.get_lextree_encs_treelstm(prefixtree)
         elif self.treetype.startswith('gcn'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            nodes_encs = self.forward_gcn(prefixtree, embeddings, adjacency)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
-        elif self.treetype.startswith('gat'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            embeddings, adjacency_mat = self.get_adjacency_mat(embeddings, adjacency)
-            # nodes_encs, edge_inds = self.get_edge_ids(embeddings, adjacency)
-            nodes_encs, edge_inds = self.GAT((embeddings, adjacency_mat))
-            # for l in range(len(self.nheads)):
-            #     nodes_encs = getattr(self, 'gat_layer{}'.format(l))(nodes_encs, edge_inds)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
+            self.gcn(prefixtree, self.embed)
         elif self.treetype.startswith('sage'):
-            embeddings, adjacency = [], []
-            self.get_lextree_encs_gcn(prefixtree, embeddings, adjacency)
-            embeddings = torch.cat(embeddings, dim=0)
-            # embeddings, adjacency = self.get_adjacency_mat(embeddings, adjacency)
-            nodes_encs = self.forward_sage(prefixtree, embeddings, adjacency)
-            for i in range(int(self.treetype[-1])-1):
-                nodes_encs = self.forward_sage(prefixtree, nodes_encs, adjacency, layerid=i+2)
-            self.fill_lextree_encs_gcn(prefixtree, nodes_encs)
+            self.sage(prefixtree, self.embed)
+        elif self.treetype.startswith('appnp'):
+            self.appnp(prefixtree, self.embed)
+        elif self.treetype.startswith('iigcn'):
+            self.gcnii(prefixtree, self.embed)
+        elif self.treetype.startswith('comb'):
+            self.combined(prefixtree, self.embed)
         else:
             self.get_lextree_encs(prefixtree)
 
@@ -570,8 +511,44 @@ class Decoder(torch.nn.Module, ScorerInterface):
             starts -= 1
         return tuple(char_tuple)
 
+    def get_classpostmask(self, classtrees, ys_in_pad):
+        classpostmasks = []
+        for classtree in classtrees:
+            newtree = classtree
+            classpostmask = []
+            for i, ys_id in enumerate(ys_in_pad):
+                postmask = [0 for k in  range(len(self.char_list))]
+                if ys_id != self.eos or i == 0:
+                    newtree = newtree[0]
+                    if ys_id == self.eos:
+                        newtree = classtree
+                    elif self.char_list[ys_id].endswith('▁'):
+                        if ys_id in newtree and newtree[ys_id][0] != {}:
+                            newtree = newtree[ys_id]
+                        else:
+                            newtree = classtree
+                    elif ys_id not in newtree:
+                        newtree = [{}]
+                    else:
+                        newtree = newtree[ys_id]
+                    for key, value in newtree[0].items():
+                        postmask[key] = 1
+                classpostmask.append(postmask)
+            classpostmask = torch.tensor(classpostmask)
+            classpostmasks.append(classpostmask)
+        classpostmasks = torch.stack(classpostmasks, dim=1)
+        return to_device(self, classpostmasks)
+
+    def get_classpost_dist(self, ptr_dist, classpostmask):
+        nclass = classpostmask.size(1)
+        ptr_dist = ptr_dist[:, :-1].contiguous()
+        masked_ptrdist = ptr_dist.unsqueeze(1).repeat(1, nclass, 1) * classpostmask
+        masked_ptrdist = torch.clamp(masked_ptrdist.sum(dim=-1), min=1e-9)
+        masked_ptrdist = masked_ptrdist / masked_ptrdist.sum(dim=-1, keepdim=True)
+        return masked_ptrdist
+
     def forward(self, hs_pad, hlens, ys_pad, strm_idx=0, lang_ids=None, meeting_info=None,
-                att_labs=None):
+                slottrees=None):
         """Decoder forward
 
         :param torch.Tensor hs_pad: batch of padded hidden state sequences (B, Tmax, D)
@@ -658,16 +635,20 @@ class Decoder(torch.nn.Module, ScorerInterface):
         eys = self.dropout_emb(self.embed(ys_in_pad))  # utt x olen x zdim
 
         # gs534 - get meeting KBs
-        slotlist = False
-        classposts = []
+        classpost = []
+        KBembeddings = []
         if meeting_info is not None and self.epoch >= self.PtrSche:
             if meeting_info[2][0] is meeting_info[2][1]:
                 self.encode_tree(meeting_info[2][0])
             else:
-                slotlist = True
-            #     for lextree in meeting_info[2]:
-            #         if lextree[0] != {}:
-            #             self.encode_tree(lextree)
+                classpostmask = []
+                for i, lextree in enumerate(meeting_info[2]):
+                    if lextree[0] != {}:
+                        self.encode_tree(lextree)
+                    if slottrees is not None:
+                        classpostmask.append(self.get_classpostmask(slottrees[i], ys_in_pad[i].tolist()))
+                if classpostmask != []:
+                    classpostmask = torch.stack(classpostmask, dim=0)
             ptr_dist_all, p_gen_all = [], []
             trees = meeting_info[2]
             p_gen_mask_all = []
@@ -708,39 +689,21 @@ class Decoder(torch.nn.Module, ScorerInterface):
             # gs534 - Add KB
             if meeting_info is not None and self.meetingKB is not None and self.epoch >= self.PtrSche:
                 factor = 0.0 if (self.epoch < self.PtrSche) else 1.0
-                att_labs_i = att_labs[:,i] if att_labs is not None else None
                 if self.ac_only:
                     query = self.dropout_KB(self.Qproj(ey))
                 else:
                     # query = z_list[-1]
                     query = self.dropout_KB(self.Qproj(torch.cat([att_c, z_list[-1]], dim=-1)))
-                if self.KBlextree and not slotlist:
+                if self.KBlextree:
                     if self.DBinput:
                         DBinput = self.DBembed((1-lex_masks[:, i, :-1].float()))
                     step_mask, trees, p_gen_mask, step_embs, back_transform = self.get_lextree_step_embs(
                         ys_ptrgen_pad[:, i], trees, meeting_info[2])
                     p_gen_mask_all.append(p_gen_mask)
                     KBembedding, ptr_dist = self.get_meetingKB_emb_map(query, step_mask, step_embs, back_transform)
-                elif self.KBlextree:
-                    KBembedding, ptr_dist, p_gen_mask, classpost = [], [], [], []
-                    newtrees = []
-                    for k, vy in enumerate(ys_ptrgen_pad[:, i]):
-                        current_tree = trees[k]
-                        vys = torch.stack([vy for count in range(len(current_tree))])
-                        step_mask, tree_track, ptr_mask, step_embs, back_transform = self.get_lextree_step_embs(
-                            vys, current_tree, meeting_info[2][k], clm=True)
-                        newtrees.append(tree_track)
-                        p_gen_mask.append(0 not in ptr_mask)
-                        results = self.get_meetingKB_emb_map_forest(query[k], step_mask, step_embs, back_transform,
-                            stacked=self.stacked)
-                        KBembedding.append(results[0])
-                        ptr_dist.append(results[1])
-                        classpost.append(results[2])
-                    trees = newtrees
-                    KBembedding = torch.cat(KBembedding, dim=0)
-                    classposts.append(torch.stack(classpost, dim=0).unsqueeze(1))
-                    ptr_dist = torch.cat(ptr_dist, dim=0)
-                    p_gen_mask_all.append(p_gen_mask)
+                    KBembeddings.append(KBembedding)
+                    if slottrees is not None:
+                        classpost.append(self.get_classpost_dist(ptr_dist, classpostmask[:, i]))
                 else:
                     print('To be implemented')
                 # pointer generator distribution
@@ -770,8 +733,6 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 z_all.append(z_out)  # utt x (zdim)
 
         z_all = torch.stack(z_all, dim=1)
-        if classposts != []:
-            classposts = torch.cat(classposts, dim=1)
         # compute loss
         y_all = self.output(z_all.view(batch * olength, -1))
         if LooseVersion(torch.__version__) < LooseVersion("1.0"):
@@ -786,7 +747,8 @@ class Decoder(torch.nn.Module, ScorerInterface):
         if meeting_info is not None and self.PtrGen and self.epoch >= self.PtrSche:
             ptr_mask = to_device(self, torch.tensor(p_gen_mask_all).byte()).t()
             self.loss, KB_loss, pfinal, ptr_gen = self.calc_ptr_loss(ptr_dist_all, y_all, p_gen_all, ptr_mask,
-                ys_out_pad.view(-1), self.ignore_id, reduction_str, att_labs=att_labs)
+                ys_out_pad.view(-1), self.ignore_id, reduction_str)
+            KBembeddings = torch.stack(KBembeddings, dim=1)
         else:
             self.loss = F.cross_entropy(
                 y_all,
@@ -798,11 +760,10 @@ class Decoder(torch.nn.Module, ScorerInterface):
         ppl = math.exp(self.loss.item())
         # -1: eos, which is removed in the loss computation
         self.loss *= np.mean([len(x) for x in ys_in]) - 1
-        # add KB loss
-        # if KB_loss is not None and KB_loss != 0:
-        #     nsamples = (att_labs.sum(dim=-1).sum(dim=-1) != 0).sum()
-        #     KB_loss = KB_loss * self.KBlossfactor / nsamples
-        #     self.loss += KB_loss
+
+        # class posterior
+        if slottrees is not None and classpost != []:
+            classpost = torch.stack(classpost, dim=1)
 
         acc = th_accuracy(pfinal if pfinal is not None else y_all, ys_out_pad, ignore_label=self.ignore_id)
         logging.info("att loss:" + "".join(str(self.loss.item()).split("\n")))
@@ -833,11 +794,12 @@ class Decoder(torch.nn.Module, ScorerInterface):
             ) / len(ys_in)
             self.loss = (1.0 - self.lsm_weight) * self.loss + self.lsm_weight * loss_reg
 
-        return self.loss, acc, ppl, z_all, ptr_gen, classposts
+        return self.loss, acc, ppl, z_all, ptr_gen, classpost, KBembeddings
 
     def recognize_beam(self, h, lpz, recog_args, char_list, rnnlm=None, strm_idx=0, meeting_info=None,
                        ranking_norm=False, fusion_lm_hidden=None, estlm=None, estlm_factor=0.0, estlm_hid=None,
-                       dynamic_disc=False, sel_lm=None, topk=1, prev_hid=None, classlm=False, slotlist=False):
+                       dynamic_disc=False, sel_lm=None, topk=1, prev_hid=None, classlm=False, slotlist=False,
+                       unigram=None, classmask=None, fixedclassmap=None):
         """beam search implementation
 
         :param torch.Tensor h: encoder hidden state (T, eprojs)
@@ -949,7 +911,10 @@ class Decoder(torch.nn.Module, ScorerInterface):
                 "a_accum": to_device(self, torch.zeros(h[0].size(0), dtype=torch.float32)),
                 "final_score": 0.0,
                 "hidden_states": [],
-                "p_gen": []
+                "clspost": [],
+                "p_gen": [],
+                "KBemb": [],
+                "classmap": None
             }
         # forward ILME
         hyp['c_prev_ilme'] = c_list_ilme
@@ -961,13 +926,16 @@ class Decoder(torch.nn.Module, ScorerInterface):
                     hyp['lextree'] = self.meetingKB.meetinglextree[meeting_info[2][0]].copy()
                 else:
                     hyp['lextree'] = meeting_info[2][0]
-                if sel_lm is None: # and not slotlist:
+                hyp['reset_tree'] = hyp['lextree']
+                if sel_lm is None and not slotlist:
                     self.encode_tree(hyp['lextree'])
             KBembedding = h[0].new_zeros(1, self.dunits)
             if sel_lm is not None:
                 hyp['sel_lm_hidden'] = sel_lm.init_hidden(1) if prev_hid is None else prev_hid
                 if classlm:
                     hyp['lextree'] = [hyp['lextree'] for i in range(topk)]
+            if slotlist and fixedclassmap is not None:
+                hyp["classmap"] = fixedclassmap
 
         if estlm is not None:
             hyp['estlm_prev'] = estlm.init_hidden(1) if estlm_hid is None else estlm_hid
@@ -1045,25 +1013,20 @@ class Decoder(torch.nn.Module, ScorerInterface):
                         new_select = []
                         if classlm:
                             class_out = class_out.squeeze(0).squeeze(0)
+                            if unigram is not None:
+                                class_out = torch.log_softmax(class_out, dim=-1) - unigram
+                            if classmask is not None:
+                                class_out = class_out.masked_fill(classmask, -1e9)
                             class_probs, classes = torch.topk(class_out, topk, dim=0)
-                            # option: combine all classes at once
-                            # for classid in classes:
-                            #     for word in self.meetingKB.classdict[self.meetingKB.classorder[classid]]:
-                            #         wordid = self.meetingKB.rarewords_word[word]
-                            #         if wordid not in new_select:
-                            #             new_select.append(wordid)
-                            # reset_lextree = self.meetingKB.get_tree_from_inds(new_select, extra=meeting_info[1])
-                            # self.encode_tree(reset_lextree)
                             reset_lextree = self.meetingKB.get_classed_trees(classes)
+                            hyp["reset_tree"] = reset_lextree
                         else:
                             lmout = lmout.squeeze(0).squeeze(0)
                             new_lm_output = lmout[meeting_info[0][0]]
                             values, new_select = torch.topk(new_lm_output, topk, dim=0)
                             reset_lextree = self.meetingKB.get_tree_from_inds(new_select, extra=meeting_info[1])
                             self.encode_tree(reset_lextree)
-                    else:
-                        meeting = meeting_info[2][0]
-                        reset_lextree = self.meetingKB.meetinglextree[meeting] if isinstance(meeting, str) else meeting
+                            hyp["reset_tree"] = reset_lextree
 
                     if self.KBlextree:
                         if self.ac_only:
@@ -1077,15 +1040,27 @@ class Decoder(torch.nn.Module, ScorerInterface):
                             # NOTE: change it back if does not work
                             DBinput = self.DBembed((1-lex_mask[:-1].unsqueeze(0).float()))
 
-                        if (classlm and new_select == []): # or slotlist:
+                        if (classlm and new_select == []) or slotlist:
                             vys = torch.stack([vy for count in range(len(hyp['lextree']))])
                             step_mask, tree_track, ptr_mask, step_embs, back_transform = self.get_lextree_step_embs(
-                                vys, hyp['lextree'], reset_lextree, clm=True)
+                                vys, hyp['lextree'], hyp["reset_tree"], clm=True)
+                            # update the classmap whenever resetting happens
+                            if classlm and tree_track == hyp["reset_tree"]:
+                                classmap = []
+                                for slot in classes:
+                                    mapvec = [0 for i in range(class_out.size(0)+1)]
+                                    mapvec[slot+1] = 1
+                                    classmap.append(mapvec)
+                                classmap = to_device(self, torch.Tensor(classmap))
+                                hyp["classmap"] = classmap
                             inKB = 0 in ptr_mask
-                            KBembedding, ptr_dist, _ = self.get_meetingKB_emb_map_forest(query, step_mask, step_embs, back_transform)
+                            class_mask = 1 - torch.Tensor(ptr_mask)
+                            KBembedding, ptr_dist, clspost = self.get_meetingKB_emb_map_forest(query, step_mask, step_embs, back_transform,
+                                                                                               class_mask=class_mask)
+                            clspost = torch.einsum('i,ij->j', clspost, hyp["classmap"])
                         else:
                             step_mask, tree_track, inKB, step_embs, back_transform = self.get_lextree_step_embs_inference(
-                                vy, hyp['lextree'], reset_lextree)
+                                vy, hyp['lextree'], hyp["reset_tree"])
                             KBembedding, ptr_dist = self.get_meetingKB_emb_map(query, step_mask, step_embs, back_transform)
 
                         # debug - gs534
@@ -1134,10 +1109,6 @@ class Decoder(torch.nn.Module, ScorerInterface):
                         # Target LM
                         rnnlm_state, local_lm_scores = rnnlm.predict(hyp["rnnlm_prev"], vy)
                         
-                        # estlm_scores_masked = F.softmax(estlm_scores.masked_fill(
-                        #     lex_mask[:-1].view(1, -1).bool(), -1e9), dim=-1)
-                        # local_lm_scores_masked = F.softmax(estlm_scores.masked_fill(
-                        #     lex_mask[:-1].view(1, -1).bool(), -1e9), dim=-1)
                         estlm_scores_masked = F.softmax(estlm_scores, dim=-1)
                         local_lm_scores_masked = F.softmax(local_lm_scores, dim=-1)
 
@@ -1153,7 +1124,7 @@ class Decoder(torch.nn.Module, ScorerInterface):
                         # ptr_dist[:,:-1] = ptr_dist[:,:-1] * (local_lm_scores_masked ** (recog_args.lm_weight - 0.2))
                     else:
                         model_dist = F.softmax(logits, dim=-1)
-                    # if hyp['yseq'] == [200, 144, 65, 1, 103, 55, 167, 43, 136, 136, 68, 152, 180, 1, 132, 106, 7, 69, 136]:
+                    # if self.char_list[hyp['yseq'][-1]] == 'HI':
                     #     import pdb; pdb.set_trace()
                     ptr_gen_complement = ptr_dist[:,-1] * p_gen
                     # print(self.char_list[hyp['yseq'][-1]])
@@ -1252,7 +1223,12 @@ class Decoder(torch.nn.Module, ScorerInterface):
                     # gs534 - lextree
                     if self.KBlextree and meeting_info != []:
                         new_hyp['lextree'] = tree_track.copy()
-                        new_hyp['p_gen'] = hyp['p_gen'] + [(ptr_dist.sum()*p_gen).item()]
+                        new_hyp['p_gen'] = hyp['p_gen'] + [(ptr_dist[:,:-1].sum()*p_gen).item()]
+                        new_hyp["reset_tree"] = hyp["reset_tree"]
+                        new_hyp["classmap"] = hyp["classmap"]
+                        new_hyp["KBemb"] = hyp['KBemb'] + [KBembedding]
+                        if classlm or slotlist:
+                            new_hyp['clspost'] = hyp['clspost'] + [clspost]
                     else:
                         new_hyp['p_gen'] = hyp['p_gen'] + [0]
                     if sel_lm is not None:
@@ -2157,5 +2133,7 @@ def decoder_for(args, odim, sos, eos, att, labeldist, meetingKB=None):
         getattr(args, "treetype", ''),
         getattr(args, "treehid", 0),
         getattr(args, "boostfactor", 0),
-        getattr(args, "stacked", False),
+        getattr(args, "treeresidual", True),
+        getattr(args, "gnntie", False),
+        getattr(args, "gnnheads", 1),
     )  # use getattr to keep compatibility

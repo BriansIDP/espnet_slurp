@@ -1261,18 +1261,30 @@ def recog(args):
     sel_lm = None
     best_hid = None
     best_fusion = None
+    unigram_penalty = None
     if args.select:
         sel_lm = torch.load(args.sel_lm, map_location=lambda storage, loc: storage)
         sel_lm.eval()
-    model.meeting_KB.get_tree_from_classes(args.classfile, args.classorder)
-    if (args.select and args.classlm): # or args.slotlist:
-        model.meeting_KB.get_tree_from_classes(args.classfile, args.classorder)
+    if (args.select and args.classlm) or args.slotlist:
+        model.meeting_KB.get_tree_from_classes(args.classfile, args.classorder, entity=args.entity)
         # pre-compute GNN tree encodings
         with torch.no_grad():
             for i in range(len(model.meeting_KB.classtrees)):
                 print("Encoding tree for class {}".format(i))
                 if model.meeting_KB.classtrees[i][0] != {}:
                     model.dec.encode_tree(model.meeting_KB.classtrees[i])
+        if args.unigram != '':
+            unigram_penalty = []
+            with open(args.unigram) as fin:
+                unigram = json.load(fin)
+            for classname in model.meeting_KB.classorder:
+                count = 0
+                words = model.meeting_KB.classdict[classname]
+                for word in words:
+                    count += unigram[word] if word in unigram else 0
+                unigram_penalty.append(max(1, count))
+            unigram_penalty = torch.Tensor(unigram_penalty)
+            unigram_penalty = torch.log(unigram_penalty / unigram_penalty.sum()) * args.penalty_factor
 
     # read json data
     with open(args.recog_json, "rb") as f:
@@ -1313,19 +1325,26 @@ def recog(args):
                 KBmodules['ooKBemb'] = model.ooKBemb
                 KBmodules['Qproj_char'] = model.Qproj_char
                 KBmodules['Qproj_acoustic'] = model.Qproj_acoustic
-                KBmodules['Kproj'] = model.Kproj
+                KBmodules['Kproj'] = getattr(model, 'Kproj', None)
                 KBmodules['pointer_gate'] = model.pointer_gate
                 KBmodules['smoothprob'] = getattr(model, 'smoothprob', 1.0)
                 KBmodules['KBin'] = getattr(model, 'KBin', False)
                 KBmodules['treetype'] = getattr(model, 'treetype', '')
                 if getattr(model, 'treetype', '').startswith('gcn'):
-                    KBmodules['gcn_l1'] = model.gcn_l1
-                    KBmodules['gcn_l2'] = model.gcn_l2
-                    if hasattr(model, 'gcn_l3'):
-                        KBmodules['gcn_l3'] = model.gcn_l3
-                elif getattr(model, 'treetype', '') == '':
+                    KBmodules['gcn'] = model.gcn
+                elif getattr(model, 'treetype', '').startswith('sage'):
+                    KBmodules['sage'] = model.sage
+                elif getattr(model, 'treetype', '').startswith('appnp'):
+                    KBmodules['appnp'] = model.appnp
+                elif getattr(model, 'treetype', '').startswith('iigcn'):
+                    KBmodules['gcnii'] = model.gcnii
+                elif getattr(model, 'treetype', '').startswith('comb'):
+                    KBmodules['combined'] = model.combined
+                else:
                     KBmodules['recursive_proj'] = model.recursive_proj
                 KBmodules['tree_hid'] = getattr(model, 'tree_hid', '')
+                KBmodules['gnnheads'] = getattr(model, 'gnnheads', 1)
+                KBmodules['jknet'] = getattr(model, 'jknet', False)
 
         beam_search_transducer = BeamSearchTransducer(
             decoder=trans_decoder,
@@ -1427,7 +1446,7 @@ def recog(args):
                         feat, args, train_args.char_list, rnnlm, meetings=meeting,
                         best_fusion=best_fusion, estlm=est_lm, estlm_factor=args.estlm_factor,
                         best_est=best_est, sel_lm=sel_lm, prev_hid=best_hid, slotlist=slotlist,
-                        oracletext=oracletext
+                        oracletext=oracletext, unigram=unigram_penalty
                     )
                 new_js[name] = add_results_to_json(
                     js[name], nbest_hyps, train_args.char_list

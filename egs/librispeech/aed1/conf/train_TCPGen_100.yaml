@@ -48,7 +48,7 @@ sortagrad: 0
 accum-grad: 6
 grad-clip: 5
 opt: noam
-epochs: 80
+epochs: 88
 patience: 0
 # weight-noise-std: 0.00
 # weight-noise-start: 20000
@@ -78,3 +78,8 @@ randomKBsample: true
 DBdrop: 0.3
 # dynamicKBs: 0
 # smoothprob: 0.0
+treetype: iigcn2
+treehid: 256
+treeresidual: true
+# gnntie: true
+# gnnheads: 2

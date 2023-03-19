@@ -910,7 +910,8 @@ def add_results_to_json(js, nbest_hyps, char_list):
         if 'slots' in hyp:
             out_dic['slots'] = hyp['slots']
             out_dic['intent_pred'] = hyp['intent_pred']
-            out_dic['shortlist'] = hyp['shortlist']
+            if 'shortlist' not in out_dic:
+                out_dic['shortlist'] = hyp['shortlist']
         # out_dic["final_score"] = final_score
 
         # add to list of N-best result dicts

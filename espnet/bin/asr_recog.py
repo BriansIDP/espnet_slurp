@@ -363,6 +363,19 @@ def get_parser():
         default=False,
         help="Use SLU slot output",
     )
+    parser.add_argument(
+        "--unigram", type=str, default='', help="Unigram file for words in ontology"
+    )
+    parser.add_argument(
+        "--penalty-factor", type=float, default=0.0, help="Unigram penalty factor for words in ontology"
+    )
+    parser.add_argument(
+        "--entity",
+        type=strtobool,
+        nargs="?",
+        default=False,
+        help="Use entity-based slot KB",
+    )
     return parser
 
 

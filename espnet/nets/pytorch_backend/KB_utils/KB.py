@@ -204,62 +204,61 @@ class KBmeetingTrain(object):
     def get_full_KB(self):
         worddict = {word:i+1 for i, word in enumerate(self.rarewords)}
         self.full_lextree = [make_lexical_tree(worddict, self.chardict, -1)]
-        self.full_wordlist = torch.LongTensor([self.vocab.get_ids(self.rarewords, oov_sym='<blank>')])
+        self.full_wordlist = torch.LongTensor([self.vocab.get_ids(self.rarewords, oov_sym='<unk>')])
 
-    def get_tree_from_classes(self, classfile, classorder, drop=0, loaded=False, truelist=None):
-        if not loaded:
-            if not isinstance(classfile, dict):
-                with open(classfile) as fin:
-                    self.classdict = json.load(fin)
-                with open(classorder) as fin:
-                    self.classorder = [line.strip() for line in fin]
-            else:
-                self.classdict = classfile
-                self.classorder = classorder
+    def get_tree_from_classes(self, classfile, classorder, entity=False):
+        with open(classfile) as fin:
+            self.classdict = json.load(fin)
+        with open(classorder) as fin:
+            self.classorder = [line.strip() for line in fin]
         self.classtrees = []
         self.named_classtrees = {}
-        if truelist is not None:
-            for cls in truelist.keys():
-                classlistsize = min(self.maxlen, len(self.classdict[cls]))
-                wordlist = set(random.sample(self.classdict[cls], k=classlistsize))
-                if len(wordlist) < self.minlen:
-                    wordlist.update(set(random.sample(list(self.rarewords_word.keys()), k=self.minlen-len(wordlist))))
-                if cls in truelist:
-                    for word in truelist[cls]:
-                        if word in wordlist and random.random() < drop:
-                            wordlist.remove(word)
-                        elif word not in wordlist and random.random() > drop:
-                            wordlist.add(word)
-                bpe_ids = [self.rarewords_word[word] for word in wordlist]
+        for cls in self.classorder:
+            if entity:
+                uttKB = sorted([tuple(word.split()) for word in self.classdict[cls]])
+                worddict = {word:i+1 for i, word in enumerate(uttKB)}
+                classtree = make_lexical_tree(worddict, self.chardict, -1)
+            else:
+                bpe_ids = [self.rarewords_word[word] for word in self.classdict[cls]]
                 classtree = self.get_tree_from_inds(bpe_ids)
-                self.classtrees.append(classtree)
-                self.named_classtrees[cls] = classtree
-        else:
-            for cls in self.classorder:
-                wordlist = random.sample(self.classdict[cls], k=int(len(self.classdict[cls])*(1-drop)))
-                bpe_ids = [self.rarewords_word[word] for word in wordlist]
-                classtree = self.get_tree_from_inds(bpe_ids)
-                self.classtrees.append(classtree)
-                self.named_classtrees[cls] = classtree
+            self.classtrees.append(classtree)
+            self.named_classtrees[cls] = classtree
 
-    def get_classed_trees(self, classes, named=False, trees=None):
+    def get_classed_trees(self, classes, named=False):
         classed_trees = []
         for cls in classes:
-            # for word in self.classdict[cls]:
-            #     if word not in classed_trees:
-            #         classed_trees.append(word)
-            if named: # and trees[cls][0] != {}:
+            if named: # and self.named_classtrees[cls][0] != {}:
                 classed_trees.append(self.named_classtrees[cls])
-            elif not named:
+            elif not named: # and self.classtrees[cls.item()][0] != {}:
                 classed_trees.append(self.classtrees[cls.item()])
         return classed_trees
 
-    def get_slot_KB(self, wlists):
+    def get_slot_KB(self, wlists, entity=False):
         trees = []
         for wlist in wlists:
-            bpe_ids = [self.rarewords_word[word] for word in wlist]
-            trees.append(self.get_tree_from_inds(bpe_ids))
+            if entity:
+                uttKB = sorted([tuple(word.split()) for word in wlist])
+                worddict = {word:i+1 for i, word in enumerate(uttKB)}
+                trees.append(make_lexical_tree(worddict, self.chardict, -1))
+            else:
+                bpe_ids = [self.rarewords_word[word] for word in wlist]
+                trees.append(self.get_tree_from_inds(bpe_ids))
         return wlists, None, trees
+
+    def get_slot_sep_KB(self, slotwlists, entity=False):
+        trees = []
+        for wlist in slotwlists:
+            tree = []
+            for slotwlist in wlist:
+                if entity:
+                    uttKB = sorted([tuple(word.split()) for word in slotwlist])
+                    worddict = {word:i+1 for i, word in enumerate(uttKB)}
+                    tree.append(make_lexical_tree(worddict, self.chardict, -1))
+                else:
+                    bpe_ids = [self.rarewords_word[word] for word in slotwlist]
+                    tree.append(self.get_tree_from_inds(bpe_ids))
+            trees.append(tree)
+        return trees
 
     def get_tree_from_inds(self, inds, extra=None, true_list=[]):
         autoKBwords = set()
@@ -288,7 +287,7 @@ class Vocabulary(object):
         with open(dictfile, encoding='utf-8') as fin:
             for i, line in enumerate(fin):
                 if bpe:
-                    word = tuple(line.split()[1:])
+                    word = tuple(line.split())
                     self.sym2idx[word] = i
                     self.idx2sym.append(word)
                 else:
