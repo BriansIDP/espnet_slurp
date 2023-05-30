@@ -1,0 +1,37 @@
+{
+    "utts": {
+        "100-121669-0000": {
+            "input": [
+                {
+                    "feat": "/home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/dump/train_960/deltafalse/feats.1.ark:16",
+                    "name": "input1",
+                    "shape": [
+                        202,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        8,
+                        601
+                    ],
+                    "text": "TOM THE PIPER'S SON",
+                    "token": "TO M▁ THE▁ PI PER ' S▁ SON▁",
+                    "tokenid": "509 332 496 390 386 1 473 458",
+                    "uttKB": [
+                        [
+                            "PI",
+                            "PER",
+                            "'",
+                            "S▁"
+                        ]
+                    ]
+                }
+            ],
+            "utt2spk": "100-121669"
+        }
+    }
+}

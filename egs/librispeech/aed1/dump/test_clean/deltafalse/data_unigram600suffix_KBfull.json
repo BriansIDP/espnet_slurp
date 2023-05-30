@@ -1,0 +1,75 @@
+{
+    "utts": {
+        "1089-134686-0000": {
+            "input": [
+                {
+                    "feat": "/home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/dump/test_clean/deltafalse/feats.1.ark:17",
+                    "name": "input1",
+                    "shape": [
+                        1042,
+                        83
+                    ]
+                }
+            ],
+            "output": [
+                {
+                    "name": "target1",
+                    "shape": [
+                        66,
+                        601
+                    ],
+                    "text": "HE HOPED THERE WOULD BE STEW FOR DINNER TURNIPS AND CARROTS AND BRUISED POTATOES AND FAT MUTTON PIECES TO BE LADLED OUT IN THICK PEPPERED FLOUR FATTENED SAUCE",
+                    "token": "HE▁ HO P ED▁ THERE▁ WOULD▁ BE▁ STE W▁ FOR▁ D IN N ER▁ TUR NI P S▁ AND▁ CAR RO TS▁ AND▁ B RU IS ED▁ PO TA TO ES▁ AND▁ F AT▁ M UT T ON▁ PI E C ES▁ TO▁ BE▁ LA D LED▁ OUT▁ IN▁ TH I CK▁ PE P PER ED▁ F L OUR▁ F AT TEN ED▁ S AU CE▁",
+                    "tokenid": "202 208 379 124 493 584 66 464 585 162 102 228 333 139 520 341 379 473 29 79 424 517 29 54 429 241 124 394 475 509 142 29 149 49 297 540 474 363 390 120 74 142 513 66 267 102 272 374 235 485 216 86 384 379 386 124 149 266 371 149 44 481 124 431 50 82",
+                    "uttKB": [
+                        [
+                            "STE",
+                            "W▁"
+                        ],
+                        [
+                            "TUR",
+                            "NI",
+                            "P",
+                            "S▁"
+                        ],
+                        [
+                            "CAR",
+                            "RO",
+                            "TS▁"
+                        ],
+                        [
+                            "B",
+                            "RU",
+                            "IS",
+                            "ED▁"
+                        ],
+                        [
+                            "M",
+                            "UT",
+                            "T",
+                            "ON▁"
+                        ],
+                        [
+                            "LA",
+                            "D",
+                            "LED▁"
+                        ],
+                        [
+                            "PE",
+                            "P",
+                            "PER",
+                            "ED▁"
+                        ],
+                        [
+                            "F",
+                            "AT",
+                            "TEN",
+                            "ED▁"
+                        ]
+                    ]
+                }
+            ],
+            "utt2spk": "1089-134686"
+        }
+    }
+}
