@@ -60,18 +60,14 @@ sampling-probability: 0.0
 # report-interval-iters: 1
 
 # KB related
-meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/LibriKBRare_unigram600suffix/rareword_f120.txt
-# meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/LibriKB1000noise_unigram600suffix
-# meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/LibriKB1000AcousticSim_unigram600suffix
+meetingpath: data/Biasing/Librispeech_unigram600suffix/rareword_f120.txt
 meetingKB: true
 lm-odim: 256
-dictfile: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/bpe_dict_unigram600suffix.txt
+dictfile: data/Biasing/bpe_dict_unigram600suffix_train960.txt
 KBlextree: true
 PtrGen: true
 PtrSche: 8
 # PtrKBin: true
-# init-full-model: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/exp/init_models/baseline.ep.15
-# init-full-model: exp/librispeech_train_baseline_spec/results/model.acc.best
 acousticonly: true
 attn_dim: 256
 KBmaxlen: 1000
