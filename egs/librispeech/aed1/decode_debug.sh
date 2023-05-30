@@ -4,7 +4,7 @@ export PYTHONPATH="/home/mifs/gs534/Documents/Project/exp/espnet/espnet/nets/pyt
 . ./path.sh || exit 1;
 echo "Start Decoding"
 echo "pythonpath = $PYTHONPATH"
-nj=128
+nj=16
 recog_set="test_clean_100"
 # recog_set="train_100"
 use_lm=false
@@ -16,7 +16,7 @@ backend=pytorch
 # Task specific
 # lmexpdir=/home/gs534/rds/hpc-work/work/AMI/exp/external_rnnlm
 tag="debug"
-expdir=/data/mifs_scratch/gs534/librispeech/exp/Librispeech100_cfmrnnt_KB500_nodrop_gcn5l_residual_tied_2heads
+expdir=/data/mifs_scratch/gs534/librispeech/exp/Librispeech100_cfmaed_KB500_nodrop_gcnii6l
 recog_model=model.loss.best
 decode_config=conf/decode.yaml
 bpemode=unigram

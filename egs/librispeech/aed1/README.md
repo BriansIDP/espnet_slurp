@@ -34,7 +34,6 @@ In the conf/train_TCPGen_100.yaml, you need to specify:
 1. `meetingpath`: The path to the wordpiece level biasing list: e.g. [data/Biasing/Librispeech_unigram600suffix/rareword_f15.txt]
 2. `dictfile`: The path to the list of all training set words in WordPiece format
 
-
 Expected validation set accuracy for train-clean-100 with unigram 600 suffix WordPieces is around 91% with TCPGen, for 80 epochs. 
 
 ## Decoding

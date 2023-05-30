@@ -45,13 +45,13 @@ minioratio: 6
 
 # optimization related
 sortagrad: 0
-accum-grad: 6
+accum-grad: 5
 grad-clip: 5
 opt: noam
 epochs: 120
 patience: 0
-# weight-noise-std: 0.00
-# weight-noise-start: 20000
+weight-noise-std: 0.00
+weight-noise-start: 30000
 transformer-lr: 2.5
 transformer-warmup-steps: 25000
 
@@ -60,16 +60,18 @@ sampling-probability: 0.0
 # report-interval-iters: 1
 
 # KB related
-meetingpath: /home/gs534/rds/hpc-work/work/Librispeech/data/KBs/LibriKBRare_unigram600suffix/rareword_f120.txt
+meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/LibriKBRare_unigram600suffix/rareword_f120.txt
+# meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/LibriKB1000noise_unigram600suffix
+# meetingpath: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/LibriKB1000AcousticSim_unigram600suffix
 meetingKB: true
-dictfile: /home/gs534/rds/hpc-work/work/Librispeech/data/KBs/bpe_dict_unigram600suffix.txt
 lm-odim: 256
+dictfile: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/data/KBs/bpe_dict_unigram600suffix.txt
 KBlextree: true
 PtrGen: true
 PtrSche: 8
 # PtrKBin: true
-# init-full-model: /home/dawna/gs534/espnet/egs/ami/ami_transformer/exp/ami_train_cfm_KB200_drop/results/model.acc.best
-# init-full-model: /home/dawna/gs534/espnet/egs/ami/ami_transformer/exp/ami_train_conformer_unigram200suffix_specaug/results/model.acc.best
+# init-full-model: /home/dawna/gs534/espnet-debug/egs/librispeech/debug_960/exp/init_models/baseline.ep.15
+# init-full-model: exp/librispeech_train_baseline_spec/results/model.acc.best
 acousticonly: true
 attn_dim: 256
 KBmaxlen: 1000
@@ -78,19 +80,19 @@ randomKBsample: true
 # DBinput: true
 # DBmask: 0.1
 DBdrop: 0.3
-# dynamicKBs: 0
 # smoothprob: 0.0
-# ILMTfactor: 0.1
-treetype: sage3
-treehid: 256
+# dynamicKBs: 1
+treetype: jknetcomb3
+# treehid: 256
+# neighbour: 3
+# gnnheads: 2
 
-# MBR
+# # MBR
 # mbrloss: true
 # mbrbeam: 5
 # mbrnbest: 5
 # mbrlambda: 1.0
-# mweweight: 0.5
-# mbrrareweight: 0.5
-# # use-wp-errors: true
-# cfm-mbr-start: 15
-# mbruseKB: false
+# mweweight: 1.0
+# mbrrareweight: 1.0
+# cfm-mbr-start: 19
+# mbruseKB: true

@@ -46,7 +46,7 @@ ngpu=0
     --config ${decode_config} \
     --ngpu ${ngpu} \
     --backend ${backend} \
-    --recog-json ${feat_recog_dir}/split${nj}utt/data_${bpemode}${nbpe}RNNT_KBfull.${JOB}.json \
+    --recog-json ${feat_recog_dir}/split${nj}utt/data_${bpemode}${nbpe}suffix_KBfull.${JOB}.json \
     --result-label ${expdir}/${decode_dir}/data.${JOB}.json \
     --model ${expdir}/results/${recog_model}  \
     ${recog_opts} \

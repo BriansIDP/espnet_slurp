@@ -3,13 +3,14 @@ export PYTHONPATH="/home/mifs/gs534/Documents/Project/exp/espnet/espnet/nets/pyt
 . ./path.sh || exit 1;
 echo "Start Decoding"
 echo "pythonpath = $PYTHONPATH"
-nj=128
-cmd="queue.pl -l qp=low,osrel=*,not_host='air120|air113|air112' -P black-svr"
+nj=16
+# cmd="queue.pl -l qp=low,osrel=*,not_host='air120|air113|air112' -P black-svr"
+cmd="run.pl"
 recog_set="test_clean_100"
 # recog_set="train_100"
 use_lm=false
 use_wordlm=false
-dumpdir=dump
+dumpdir=/data/mifs_scratch/gs534/librispeech/dump
 do_delta=false
 backend=pytorch
 
@@ -17,7 +18,7 @@ backend=pytorch
 lmexpdir=/home/gs534/rds/hpc-work/work/AMI/exp/external_rnnlm
 tag="no_lm_b30"
 # expdir=exp/ami_train_transformer_concat
-expdir=./exp/Librispeech_TCPGen_baseline
+expdir=/data/mifs_scratch/gs534/librispeech/exp/Librispeech100_cfmaed_KB500_nodrop_gcnii6l
 recog_model=model.loss.best
 decode_config=conf/decode.yaml
 bpemode=unigram

@@ -78,7 +78,7 @@ randomKBsample: true
 DBdrop: 0.3
 # dynamicKBs: 0
 # smoothprob: 0.0
-treetype: iigcn2
+treetype: gcn2
 treehid: 256
 treeresidual: true
 # gnntie: true
